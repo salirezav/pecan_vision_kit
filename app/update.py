@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 import time
@@ -16,6 +15,7 @@ GITHUB_REPO = "salirezav/pecan_vision_kit"
 GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 CACHE_TTL_SEC = 3600
 UPDATE_STATUS_PATH = Path("/mnt/recordings/update-status.json")
+UPDATE_REQUEST_PATH = Path("/mnt/recordings/update-request.json")
 CACHE_PATH = Path("/mnt/recordings/update-check-cache.json")
 USER_AGENT = "pecan-vision-kit-updater"
 
@@ -206,6 +206,18 @@ def start_apply_update(root: Path, release: dict[str, Any]) -> tuple[bool, str]:
 
     log_path = Path("/mnt/recordings/update-apply.log")
     log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # sudo env_reset drops PECAN_* vars — pass the request via a file instead.
+    request = {
+        "version": version,
+        "tarball_url": tarball,
+        "sha256_url": sha_url,
+        "kit_root": str(root),
+        "requested_at": time.time(),
+    }
+    UPDATE_REQUEST_PATH.parent.mkdir(parents=True, exist_ok=True)
+    UPDATE_REQUEST_PATH.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
+
     write_update_status(
         {
             "state": "starting",
@@ -214,12 +226,6 @@ def start_apply_update(root: Path, release: dict[str, Any]) -> tuple[bool, str]:
             "message": "Update requested from the dashboard.",
         }
     )
-
-    env = os.environ.copy()
-    env["PECAN_UPDATE_VERSION"] = version
-    env["PECAN_UPDATE_TARBALL_URL"] = tarball
-    env["PECAN_UPDATE_SHA256_URL"] = sha_url
-    env["PECAN_KIT_ROOT"] = str(root)
 
     # Absolute paths must match config/sudoers-pecan-vision.
     # setsid + start_new_session so stopping pecan-vision does not kill the installer.
@@ -238,7 +244,6 @@ def start_apply_update(root: Path, release: dict[str, Any]) -> tuple[bool, str]:
                 stdout=logf,
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
-                env=env,
                 start_new_session=True,
             )
     except OSError as exc:

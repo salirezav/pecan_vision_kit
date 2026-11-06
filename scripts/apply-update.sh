@@ -3,10 +3,26 @@
 # Invoked via passwordless sudo from the web UI (setsid / detached).
 set -euo pipefail
 
-KIT_ROOT="${PECAN_KIT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-VERSION="${PECAN_UPDATE_VERSION:-}"
-TARBALL_URL="${PECAN_UPDATE_TARBALL_URL:-}"
-SHA256_URL="${PECAN_UPDATE_SHA256_URL:-}"
+REQUEST_FILE="/mnt/recordings/update-request.json"
+# Prefer request file (sudo env_reset drops PECAN_*). Env vars remain a fallback.
+if [[ -f "$REQUEST_FILE" ]]; then
+  eval "$(python3 - <<'PY'
+import json
+from pathlib import Path
+data = json.loads(Path("/mnt/recordings/update-request.json").read_text())
+def esc(value: str) -> str:
+    return value.replace("'", "'\"'\"'")
+print(f"VERSION='{esc(str(data.get('version') or ''))}'")
+print(f"TARBALL_URL='{esc(str(data.get('tarball_url') or ''))}'")
+print(f"SHA256_URL='{esc(str(data.get('sha256_url') or ''))}'")
+print(f"KIT_ROOT='{esc(str(data.get('kit_root') or ''))}'")
+PY
+)"
+fi
+KIT_ROOT="${KIT_ROOT:-${PECAN_KIT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}}"
+VERSION="${VERSION:-${PECAN_UPDATE_VERSION:-}}"
+TARBALL_URL="${TARBALL_URL:-${PECAN_UPDATE_TARBALL_URL:-}}"
+SHA256_URL="${SHA256_URL:-${PECAN_UPDATE_SHA256_URL:-}}"
 SERVICE="pecan-vision.service"
 BACKUP_ROOT="/var/lib/pecan-vision/backup"
 STATUS_FILE="/mnt/recordings/update-status.json"
@@ -144,6 +160,11 @@ if [[ -x "$KIT_ROOT/.venv/bin/pip" ]]; then
   if ! "$KIT_ROOT/.venv/bin/pip" install -r "$KIT_ROOT/app/requirements.txt"; then
     restore_backup "$BACKUP_DIR"
     fail "pip install failed; rolled back to $PREV_VERSION"
+  fi
+  # ultralytics depends on opencv-python. Put the headless camera build back.
+  if ! "$KIT_ROOT/.venv/bin/pip" install --force-reinstall --no-deps "opencv-python-headless>=4.8"; then
+    restore_backup "$BACKUP_DIR"
+    fail "OpenCV restore failed; rolled back to $PREV_VERSION"
   fi
 fi
 
