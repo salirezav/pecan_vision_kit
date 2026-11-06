@@ -1,0 +1,4 @@
+flask>=3.0,<4
+opencv-python-headless>=4.8
+PyYAML>=6.0
+rfdetr>=1.11.2

@@ -1,0 +1,21 @@
+[Unit]
+Description=Pecan Vision Kit web recorder
+After=network-online.target local-fs.target
+Wants=network-online.target
+RequiresMountsFor=/mnt/recordings
+
+[Service]
+Type=simple
+User=engr-ugaif
+Group=engr-ugaif
+WorkingDirectory=/home/engr-ugaif/pecan-vision-kit/app
+ExecStart=/home/engr-ugaif/pecan-vision-kit/.venv/bin/python /home/engr-ugaif/pecan-vision-kit/app/server.py
+Restart=on-failure
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+# Camera + video group access
+SupplementaryGroups=video
+
+[Install]
+WantedBy=multi-user.target

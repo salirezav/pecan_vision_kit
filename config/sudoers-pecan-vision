@@ -1,0 +1,3 @@
+# Allow the kit user to manage the recorder service and apply updates without a password
+# Installed to /etc/sudoers.d/pecan-vision by setup-kit.sh
+engr-ugaif ALL=(root) NOPASSWD: /bin/systemctl start pecan-vision.service, /bin/systemctl stop pecan-vision.service, /bin/systemctl restart pecan-vision.service, /bin/systemctl status pecan-vision.service, /bin/systemctl is-active pecan-vision.service, /usr/bin/setsid /usr/bin/bash /home/engr-ugaif/pecan-vision-kit/scripts/apply-update.sh

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Record — Pecan Vision Kit {{ kit_id }}{% endblock %}
+{% block content %}
+<section class="hero-record">
+  <div class="preview-wrap">
+    <img class="preview" src="{{ url_for('video_feed') }}" alt="Live camera preview">
+    <div id="rec-badge" class="rec-badge {% if status.recording %}on{% endif %}">
+      {% if status.recording %}RECORDING{% else %}READY{% endif %}
+    </div>
+  </div>
+
+  <div class="controls">
+    <p class="hint">Point the camera at the line, then press Start. Press Stop when finished.</p>
+    <div id="storage-status" class="storage-status" hidden></div>
+    <div class="big-actions">
+      <button id="btn-start" class="btn start" type="button">Start recording</button>
+      <button id="btn-stop" class="btn stop" type="button">Stop recording</button>
+    </div>
+    <p id="msg" class="msg" aria-live="polite"></p>
+    <dl class="meta">
+      <div><dt>Resolution</dt><dd id="meta-res">{{ status.width }}×{{ status.height }}</dd></div>
+      <div><dt>Frame rate</dt><dd id="meta-fps">{{ status.fps }} fps</dd></div>
+      <div><dt>Free space</dt><dd>{% if disk.free_gb is defined %}{{ disk.free_gb }} GB{% else %}n/a{% endif %}</dd></div>
+      <div><dt>Current file</dt><dd id="meta-file">{{ status.current_file or "—" }}</dd></div>
+    </dl>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='storage-status.js') }}"></script>
+<script src="{{ url_for('static', filename='record.js') }}"></script>
+<script>
+  (async () => {
+    const box = document.getElementById('storage-status');
+    try {
+      const analysis = await window.PecanStorage.analyze({});
+      window.PecanStorage.renderAnalysis(box, analysis);
+    } catch (err) {
+      box.hidden = false;
+      box.className = 'storage-status warn';
+      box.textContent = err.message || String(err);
+    }
+  })();
+</script>
+{% endblock %}

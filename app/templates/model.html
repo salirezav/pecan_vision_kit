@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Model — Pecan Vision Kit {{ kit_id }}{% endblock %}
+{% block content %}
+<section class="hero-record">
+  <div class="model-views">
+    <div class="preview-wrap">
+      <img class="preview" src="{{ url_for('video_feed') }}" alt="Live camera preview">
+      <div class="preview-caption">Live camera</div>
+    </div>
+    <div class="preview-wrap">
+      <img id="result" class="preview" alt="Model result" hidden>
+      <div id="result-empty" class="result-empty">The model result will show up here.</div>
+      <div class="preview-caption">Model result</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <p class="hint">Upload the weights file you downloaded (.pt or .pth). Then point the camera and press Check.</p>
+    <p id="model-status" class="msg">Looking for a model…</p>
+
+    <form id="upload-form" class="form-grid">
+      <label class="wide">Weights file
+        <input id="weights-file" name="file" type="file" accept=".pt,.pth">
+      </label>
+      <label class="wide">Class names, in order
+        <input id="class-names" name="class_names" type="text" placeholder="A, Crack, Kernel, Shell" autocomplete="off">
+      </label>
+      <div class="row-actions">
+        <button id="btn-upload" class="btn primary" type="submit">Upload model</button>
+        <button id="btn-names" class="btn" type="button">Save names</button>
+      </div>
+    </form>
+
+    <label class="threshold-row">Confidence
+      <input id="threshold" type="range" min="0.05" max="0.95" step="0.05" value="0.50">
+      <span id="threshold-value">50%</span>
+    </label>
+    <label class="speed-row">Speed
+      <select id="speed">
+        <option value="fast" selected>Fast (~1s)</option>
+        <option value="balanced">Balanced</option>
+        <option value="accurate">Accurate (slower)</option>
+      </select>
+    </label>
+
+    <div class="big-actions">
+      <button id="btn-check" class="btn start" type="button">Check this frame</button>
+      <button id="btn-live" class="btn" type="button" aria-pressed="false">Keep checking</button>
+    </div>
+    <p id="msg" class="msg" aria-live="polite"></p>
+    <div id="counts" class="class-list"></div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='model.js') }}"></script>
+{% endblock %}

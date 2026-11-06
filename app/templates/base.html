@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Pecan Vision Kit{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="brand-mark">Pecan Vision</span>
+      <span class="kit">Kit {{ kit_id|default('??') }}</span>
+    </div>
+    <nav>
+      <a href="{{ url_for('index') }}">Record</a>
+      <a href="{{ url_for('model_page') }}">Model</a>
+      <a href="{{ url_for('videos_page') }}">Videos</a>
+      <a href="{{ url_for('settings_page') }}">Settings</a>
+      <a href="{{ url_for('admin_page') }}">Admin</a>
+    </nav>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <footer>
+    <p>Videos save to the kit’s storage drive. Need help? Open <strong>Admin</strong>.</p>
+    <p class="version">Software {{ app_version_label|default(app_version|default('?')) }}</p>
+  </footer>
+  <script src="{{ url_for('static', filename='update.js') }}" defer></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

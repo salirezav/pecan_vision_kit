@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+config/ap-credentials.txt
+hand-off.md
+*.avi
+*.pt
+*.pth
+.previews/
+.DS_Store
+dist/
+*.tar.gz
+SHA256SUMS

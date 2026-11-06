@@ -1,0 +1,19 @@
+# Default recorder settings (copied to /mnt/recordings/config.yaml on first run)
+kit_id: "01"
+save_dir: /mnt/recordings/videos
+camera_device: /dev/v4l/by-id/usb-Global_Shutter_Camera_Global_Shutter_Camera_2605160001-video-index0
+# Fallback if by-id path missing on another kit:
+camera_device_fallback: /dev/video0
+width: 1280
+height: 720
+fps: 60
+fourcc: MJPG
+# Capture as MJPEG AVI (fast/reliable), then finalize to H.264 MP4 after Stop.
+record_extension: .avi
+finalize_to_mp4: true
+# Lower CRF = higher quality / larger files. 18≈visually excellent, 23≈default, 28≈small.
+h264_crf: 20
+h264_preset: veryfast
+delete_avi_after_convert: true
+host: 0.0.0.0
+port: 8080

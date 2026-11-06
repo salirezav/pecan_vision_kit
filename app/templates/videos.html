@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Videos — Pecan Vision{% endblock %}
+{% block content %}
+<section class="videos-layout">
+  <section class="panel player-panel">
+    <h1>Recorded videos</h1>
+    <p class="hint">Tap a video to watch it. After recording, files convert to H.264 MP4 (smaller + playable) — wait until conversion finishes. Download keeps a copy on your phone/computer.</p>
+    <video id="player" class="video-player" controls playsinline></video>
+    <p id="player-label" class="msg">Select a video to play</p>
+  </section>
+
+  <section class="panel list-panel">
+    <div class="list-header">
+      <div>
+        <h2>Library</h2>
+        <p class="hint save-path">Saving to: <code id="save-dir-label">{{ save_dir }}</code></p>
+      </div>
+      <div class="row-actions">
+        <button type="button" class="btn small" id="btn-browse-save">Browse save folder</button>
+        <button type="button" class="btn small" id="btn-refresh">Refresh</button>
+      </div>
+    </div>
+
+    <div id="usb-banner" class="usb-banner" hidden></div>
+    <div id="storage-status" class="storage-status" hidden></div>
+    <p id="videos-status" class="msg" aria-live="polite"></p>
+    <div id="video-list" class="video-list"></div>
+  </section>
+</section>
+
+<div id="browse-modal" class="modal" aria-hidden="true">
+  <div class="modal-card" role="dialog" aria-label="Choose save folder">
+    <div class="modal-head">
+      <h2>Choose save folder</h2>
+      <button type="button" class="btn small" data-browse-close>Close</button>
+    </div>
+    <p class="hint">Pick kit storage or a USB drive, then open folders and press <strong>Use this folder</strong>.</p>
+    <div id="browse-volumes" class="vol-row"></div>
+    <div class="browse-toolbar">
+      <button type="button" class="btn small" id="browse-up">Up</button>
+      <code id="browse-path" class="browse-path"></code>
+    </div>
+    <div id="browse-list" class="browse-list"></div>
+    <p id="browse-status" class="msg" aria-live="polite"></p>
+    <div class="row-actions">
+      <button type="button" class="btn primary" id="browse-select">Use this folder</button>
+      <button type="button" class="btn small" data-browse-close>Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script id="videos-boot" type="application/json">{{ {"videos": videos, "save_dir": save_dir, "volumes": volumes}|tojson }}</script>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='storage-status.js') }}"></script>
+<script src="{{ url_for('static', filename='browse.js') }}"></script>
+<script src="{{ url_for('static', filename='videos.js') }}"></script>
+{% endblock %}

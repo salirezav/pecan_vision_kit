@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Admin — Pecan Vision Kit {{ kit_id }}{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>Admin & troubleshooting</h1>
+  <p class="hint">For trainers / IT. Attendees usually only need the <a href="{{ url_for('index') }}">Record</a> page.</p>
+</section>
+
+<section class="panel">
+  <h2>Web app service</h2>
+  <p>Status: <strong class="{% if service_active %}ok{% else %}err{% endif %}">{{ service_raw }}</strong></p>
+  <div class="row-actions">
+    <button class="btn" data-svc="start" type="button">Start</button>
+    <button class="btn stop" data-svc="stop" type="button">Stop</button>
+    <button class="btn primary" data-svc="restart" type="button">Restart</button>
+    <button class="btn" data-svc="status" type="button">Refresh status</button>
+  </div>
+  <pre id="svc-out" class="log"></pre>
+</section>
+
+<section class="panel">
+  <h2>Software</h2>
+  <dl class="meta">
+    <div><dt>Installed</dt><dd id="software-version">{{ app_version_label|default(app_version|default('?')) }}</dd></div>
+    <div><dt>Updates</dt><dd id="software-update-state">Checking…</dd></div>
+  </dl>
+  <p class="hint">Needs internet (usually Ethernet) to reach GitHub Releases. The config Wi‑Fi AP alone is not enough.</p>
+  <div class="row-actions">
+    <button class="btn" id="btn-check-update" type="button">Check for update</button>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Camera</h2>
+  <dl class="meta">
+    <div><dt>Device</dt><dd><code>{{ status.device }}</code></dd></div>
+    <div><dt>Preview alive</dt><dd>{{ "yes" if status.has_frame else "no" }}</dd></div>
+    <div><dt>Recording</dt><dd>{{ "yes" if status.recording else "no" }}</dd></div>
+    <div><dt>Last error</dt><dd>{{ status.last_error or "—" }}</dd></div>
+  </dl>
+  <ol class="checklist">
+    <li>Is the USB cable seated in a <strong>blue USB3</strong> port?</li>
+    <li>Run on the Pi (VNC/terminal): <code>lsusb | grep -i shutter</code></li>
+    <li>Then: <code>v4l2-ctl --list-devices</code></li>
+    <li>Restart the service above after replugging the camera.</li>
+  </ol>
+</section>
+
+<section class="panel">
+  <h2>Storage</h2>
+  {% if disk.error %}
+  <p class="err">{{ disk.error }}</p>
+  {% else %}
+  <dl class="meta">
+    <div><dt>Mount</dt><dd><code>{{ disk.path }}</code></dd></div>
+    <div><dt>Free</dt><dd>{{ disk.free_gb }} GB / {{ disk.total_gb }} GB</dd></div>
+  </dl>
+  {% endif %}
+  <h3>Recent videos</h3>
+  <ul class="file-list">
+    {% for v in videos %}
+    <li><code>{{ v.name }}</code> — {{ v.size_mb }} MB — {{ v.mtime }}</li>
+    {% else %}
+    <li>No recordings yet.</li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="panel">
+  <h2>Network</h2>
+  <p>Hostname: <strong>{{ network.hostname }}</strong></p>
+  <p class="hint">Config Wi‑Fi AP (phones): join <code>PecanCam-{{ kit_id }}</code>, then open <code>http://10.42.0.1:8080</code>. Plant network: plug Ethernet into <code>eth0</code>.</p>
+  <pre class="log">{{ network.ip_addr }}</pre>
+  <pre class="log">{{ network.nm_devices }}</pre>
+</section>
+
+<section class="panel">
+  <h2>VNC</h2>
+  <ol class="checklist">
+    <li>Connect to the Pi over Ethernet or the config AP.</li>
+    <li>Use a VNC viewer to the Pi’s IP (AP gateway is usually <code>10.42.0.1</code>).</li>
+    <li>Open Chromium → <code>http://localhost:8080</code> for the same UI.</li>
+    <li>Terminal shortcuts:
+      <pre class="log">sudo systemctl status pecan-vision
+sudo systemctl restart pecan-vision
+journalctl -u pecan-vision -n 50 --no-pager
+df -h /mnt/recordings
+lsusb | grep -i shutter</pre>
+    </li>
+  </ol>
+</section>
+
+<section class="panel">
+  <h2>Service log (last lines)</h2>
+  <pre class="log">{{ journal }}</pre>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.querySelectorAll('[data-svc]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const action = btn.getAttribute('data-svc');
+      const out = document.getElementById('svc-out');
+      out.textContent = 'Working…';
+      const res = await fetch('{{ url_for("admin_service") }}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'action=' + encodeURIComponent(action)
+      });
+      const data = await res.json();
+      out.textContent = data.output || data.error || JSON.stringify(data);
+      if (action !== 'status') setTimeout(() => location.reload(), 1200);
+    });
+  });
+</script>
+{% endblock %}

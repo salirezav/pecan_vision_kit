@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}Settings — Pecan Vision{% endblock %}
+{% block content %}
+<section class="settings-layout">
+  <div class="preview-wrap sticky-preview">
+    <img class="preview" id="settings-preview" src="{{ url_for('video_feed') }}" alt="Live camera preview">
+    <div class="preview-caption">Live preview — change a setting and watch the image update</div>
+  </div>
+
+  <div class="settings-side">
+    <section class="panel">
+      <h1>Recording settings</h1>
+      {% if message %}<p class="ok">{{ message }}</p>{% endif %}
+      {% if error %}<p class="err">{{ error }}</p>{% endif %}
+
+      <form method="post" class="form-grid" id="settings-form">
+        <label>
+          Resolution
+          <select name="width" id="res-select">
+            {% for w, h in resolutions %}
+            <option value="{{ w }}" data-height="{{ h }}"
+              {% if status.width == w and status.height == h %}selected{% endif %}>
+              {{ w }}×{{ h }}
+            </option>
+            {% endfor %}
+          </select>
+          <input type="hidden" name="height" id="height-field" value="{{ status.height }}">
+        </label>
+
+        <label>
+          Frame rate (fps)
+          <select name="fps" id="fps-select">
+            {% for f in fps_choices %}
+            <option value="{{ f }}" {% if status.fps == f %}selected{% endif %}>{{ f }}</option>
+            {% endfor %}
+          </select>
+        </label>
+
+        <label class="wide">
+          Save folder
+          <div class="path-row">
+            <input type="text" name="save_dir" id="save-dir-input" value="{{ settings.save_dir }}" spellcheck="false">
+            <button type="button" class="btn small" id="btn-browse-save">Browse</button>
+          </div>
+        </label>
+
+        <div class="row-actions">
+          <button class="btn primary" type="submit">Save settings</button>
+          <button type="button" class="btn small" id="btn-analyze">Check storage speed</button>
+        </div>
+      </form>
+
+      <div id="storage-status" class="storage-status" hidden></div>
+      <p class="hint">Tip for fast pecan lines: try <strong>1280×720 at 60–120 fps</strong> on kit storage. Higher fps = larger files and needs a faster drive.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Camera picture controls</h2>
+      <p class="hint">Ranges come from the camera. Checkboxes are on/off. Sliders update the live preview. Greyed controls are locked until you turn off the related auto mode.</p>
+      <p id="v4l-status" class="msg" aria-live="polite"></p>
+      <div id="v4l-controls" class="ctrl-list"></div>
+      <script id="v4l-controls-data" type="application/json">{{ controls|tojson }}</script>
+    </section>
+  </div>
+</section>
+
+<div id="browse-modal" class="modal" aria-hidden="true">
+  <div class="modal-card" role="dialog" aria-label="Choose save folder">
+    <div class="modal-head">
+      <h2>Choose save folder</h2>
+      <button type="button" class="btn small" data-browse-close>Close</button>
+    </div>
+    <p class="hint">Pick kit storage or a USB drive, then open folders and press <strong>Use this folder</strong>.</p>
+    <div id="browse-volumes" class="vol-row"></div>
+    <div class="browse-toolbar">
+      <button type="button" class="btn small" id="browse-up">Up</button>
+      <code id="browse-path" class="browse-path"></code>
+    </div>
+    <div id="browse-list" class="browse-list"></div>
+    <p id="browse-status" class="msg" aria-live="polite"></p>
+    <div class="row-actions">
+      <button type="button" class="btn primary" id="browse-select">Use this folder</button>
+      <button type="button" class="btn small" data-browse-close>Cancel</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='storage-status.js') }}"></script>
+<script src="{{ url_for('static', filename='browse.js') }}"></script>
+<script src="{{ url_for('static', filename='settings-controls.js') }}"></script>
+<script>
+  const sel = document.getElementById('res-select');
+  const height = document.getElementById('height-field');
+  const fpsSel = document.getElementById('fps-select');
+  const saveInput = document.getElementById('save-dir-input');
+  const statusBox = document.getElementById('storage-status');
+
+  function syncHeight() {
+    const opt = sel.options[sel.selectedIndex];
+    height.value = opt.getAttribute('data-height');
+  }
+  sel.addEventListener('change', syncHeight);
+  syncHeight();
+
+  async function runAnalyze() {
+    statusBox.hidden = false;
+    statusBox.className = 'storage-status';
+    statusBox.textContent = 'Testing write speed (a few seconds)…';
+    try {
+      const analysis = await window.PecanStorage.analyze({
+        path: saveInput.value,
+        width: Number(sel.value),
+        height: Number(height.value),
+        fps: Number(fpsSel.value),
+      });
+      window.PecanStorage.renderAnalysis(statusBox, analysis);
+    } catch (err) {
+      statusBox.className = 'storage-status fail';
+      statusBox.textContent = err.message || String(err);
+    }
+  }
+
+  document.getElementById('btn-analyze').addEventListener('click', runAnalyze);
+  document.getElementById('btn-browse-save').addEventListener('click', () => {
+    window.PecanBrowse.open(saveInput.value || '/mnt/recordings/videos', async (path) => {
+      const res = await fetch('/api/save-dir', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Could not set folder');
+      saveInput.value = data.save_dir;
+      if (data.analysis) window.PecanStorage.renderAnalysis(statusBox, data.analysis);
+    });
+  });
+
+  runAnalyze();
+</script>
+{% endblock %}
