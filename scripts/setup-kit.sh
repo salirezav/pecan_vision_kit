@@ -92,6 +92,8 @@ setup_venv() {
   source "$VENV/bin/activate"
   pip install --upgrade pip wheel
   pip install -r "$KIT_ROOT/app/requirements.txt"
+  # ultralytics depends on opencv-python. Keep the headless build the camera uses.
+  pip install --force-reinstall --no-deps "opencv-python-headless>=4.8"
   ok "Virtualenv ready: $VENV"
 }
 

@@ -31,7 +31,7 @@ The interactive setup script can:
 
 ## Model weights
 
-`.pt` / `.pth` files are **not** shipped in this repository (they are gitignored). Place models under `weights/` on each kit, or upload them from the **Model** page. App updates do not replace local weights.
+`.pt` / `.pth` files are **not** shipped in this repository (they are gitignored). Place models under `weights/` on each kit, or upload them from the **Model** page. The page reads the task and class list from the file when the checkpoint stores them. RF-DETR segmentation files and YOLO checkpoints (detection, segmentation, classification, pose, rotated boxes, semantic segmentation, and depth) can be loaded. YOLO support uses [Ultralytics](https://github.com/ultralytics/ultralytics), which is AGPL-3.0. App updates do not replace local weights.
 
 ## Updates
 

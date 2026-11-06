@@ -2,3 +2,5 @@ flask>=3.0,<4
 opencv-python-headless>=4.8
 PyYAML>=6.0
 rfdetr>=1.11.2
+# YOLO checkpoints. Ultralytics is AGPL-3.0; release updates install it from this file.
+ultralytics>=8.4.23,<8.5
