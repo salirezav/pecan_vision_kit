@@ -161,10 +161,14 @@ if [[ -x "$KIT_ROOT/.venv/bin/pip" ]]; then
     restore_backup "$BACKUP_DIR"
     fail "pip install failed; rolled back to $PREV_VERSION"
   fi
-  # ultralytics depends on opencv-python. Put the headless camera build back.
-  if ! "$KIT_ROOT/.venv/bin/pip" install --force-reinstall --no-deps "opencv-python-headless>=4.8"; then
-    restore_backup "$BACKUP_DIR"
-    fail "OpenCV restore failed; rolled back to $PREV_VERSION"
+  # ultralytics asks for opencv-python. Put the headless camera build back
+  # only when that full package was actually installed.
+  if "$KIT_ROOT/.venv/bin/pip" show opencv-python >/dev/null 2>&1; then
+    "$KIT_ROOT/.venv/bin/pip" uninstall -y opencv-python || true
+    if ! "$KIT_ROOT/.venv/bin/pip" install --force-reinstall --no-deps "opencv-python-headless>=4.8"; then
+      restore_backup "$BACKUP_DIR"
+      fail "OpenCV restore failed; rolled back to $PREV_VERSION"
+    fi
   fi
 fi
 
