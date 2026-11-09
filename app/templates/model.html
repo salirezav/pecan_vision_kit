@@ -1,62 +1,99 @@
 {% extends "base.html" %}
 {% block title %}Model — Pecan Vision Kit {{ kit_id }}{% endblock %}
 {% block content %}
-<section class="hero-record">
-  <div class="model-views">
-    <div class="preview-wrap">
-      <img class="preview" src="{{ url_for('video_feed') }}" alt="Live camera preview">
-      <div class="preview-caption">Live camera</div>
+<section class="model-layout">
+  <div class="model-stage">
+    <div class="model-views">
+      <div class="preview-wrap">
+        <img class="preview" src="{{ url_for('video_feed') }}" alt="Live camera preview">
+        <div class="preview-caption">Live camera</div>
+      </div>
+      <div class="preview-wrap">
+        <img id="result" class="preview" alt="Model result" hidden>
+        <div id="result-empty" class="result-empty">The model result will show up here.</div>
+        <div id="result-caption" class="preview-caption">Model result</div>
+      </div>
     </div>
-    <div class="preview-wrap">
-      <img id="result" class="preview" alt="Model result" hidden>
-      <div id="result-empty" class="result-empty">The model result will show up here.</div>
-      <div id="result-caption" class="preview-caption">Model result</div>
+
+    <div class="controls model-setup">
+      <p class="hint">Upload and test a model here. Save the metrics you care about, then open <a href="{{ url_for('deploy_page') }}">Deploy</a> for live Grafana-style charts.</p>
+      <p id="model-status" class="msg">Looking for a model…</p>
+      <div id="model-card" class="model-card" hidden>
+        <p id="model-kind" class="model-kind"></p>
+        <p id="model-does" class="model-summary"></p>
+        <dl id="model-facts" class="model-facts"></dl>
+        <p id="model-names-note" class="hint"></p>
+        <ul id="class-chips" class="class-chips"></ul>
+        <p id="model-library" class="msg err" hidden></p>
+      </div>
+
+      <form id="upload-form" class="form-grid">
+        <label class="wide">Weights file
+          <input id="weights-file" name="file" type="file" accept=".pt,.pth">
+        </label>
+        <label id="names-field" class="wide">Class names, in order
+          <input id="class-names" name="class_names" type="text" placeholder="Leave blank to use the names stored in the file" autocomplete="off">
+        </label>
+        <div class="row-actions">
+          <button id="btn-upload" class="btn primary" type="submit">Upload model</button>
+          <button id="btn-names" class="btn" type="button">Save names</button>
+        </div>
+      </form>
+
+      <label id="confidence-row" class="threshold-row"><span id="confidence-label">Confidence</span>
+        <input id="threshold" type="range" min="0.05" max="0.95" step="0.05" value="0.50">
+        <span id="threshold-value">50%</span>
+      </label>
+      <label class="speed-row">Speed
+        <select id="speed">
+          <option value="fast" selected>Fast</option>
+          <option value="balanced">Balanced</option>
+          <option value="accurate">Accurate</option>
+        </select>
+      </label>
+
+      <div class="big-actions">
+        <button id="btn-check" class="btn start" type="button">Check this frame</button>
+        <button id="btn-start" class="btn" type="button">Keep checking</button>
+        <button id="btn-stop" class="btn stop" type="button" disabled>Stop checking</button>
+      </div>
+      <p id="msg" class="msg" aria-live="polite"></p>
+      <div id="counts" class="class-list"></div>
     </div>
   </div>
 
-  <div class="controls">
-    <p class="hint">Upload a .pt or .pth weights file. The kit reads what the model does, and its class names, from the file.</p>
-    <p id="model-status" class="msg">Looking for a model…</p>
-    <div id="model-card" class="model-card" hidden>
-      <p id="model-kind" class="model-kind"></p>
-      <p id="model-does" class="model-summary"></p>
-      <dl id="model-facts" class="model-facts"></dl>
-      <p id="model-names-note" class="hint"></p>
-      <ul id="class-chips" class="class-chips"></ul>
-      <p id="model-library" class="msg err" hidden></p>
+  <div id="metrics-panel" class="metrics-panel model-metrics" hidden>
+    <div class="metrics-panel-head">
+      <h2 class="metrics-title">Metrics to extract</h2>
+      <button id="btn-reset-run" class="btn" type="button">Reset run</button>
     </div>
-
-    <form id="upload-form" class="form-grid">
-      <label class="wide">Weights file
-        <input id="weights-file" name="file" type="file" accept=".pt,.pth">
+    <p id="metrics-note" class="hint"></p>
+    <div id="metrics-list" class="metrics-list"></div>
+    <form id="metric-form" class="metric-form">
+      <label class="wide">Name
+        <input id="metric-name" type="text" maxlength="80" placeholder="Intact-half ratio" autocomplete="off">
       </label>
-      <label id="names-field" class="wide">Class names, in order
-        <input id="class-names" name="class_names" type="text" placeholder="Leave blank to use the names stored in the file" autocomplete="off">
-      </label>
+      <fieldset id="metric-measure-row" class="metric-measure">
+        <legend>Measure</legend>
+        <label><input type="radio" name="metric-measure" value="area" checked> Pixel area</label>
+        <label><input type="radio" name="metric-measure" value="count"> Object count</label>
+      </fieldset>
+      <div class="metric-sides">
+        <div>
+          <p class="metric-side-label">Numerator</p>
+          <ul id="metric-num" class="metric-chips"></ul>
+        </div>
+        <div>
+          <p class="metric-side-label">Denominator</p>
+          <ul id="metric-den" class="metric-chips"></ul>
+        </div>
+      </div>
+      <p id="metric-formula" class="metric-formula"></p>
       <div class="row-actions">
-        <button id="btn-upload" class="btn primary" type="submit">Upload model</button>
-        <button id="btn-names" class="btn" type="button">Save names</button>
+        <button id="btn-metric-save" class="btn primary" type="submit">Save metric</button>
+        <button id="btn-metric-cancel" class="btn" type="button" hidden>Cancel edit</button>
       </div>
     </form>
-
-    <label id="confidence-row" class="threshold-row"><span id="confidence-label">Confidence</span>
-      <input id="threshold" type="range" min="0.05" max="0.95" step="0.05" value="0.50">
-      <span id="threshold-value">50%</span>
-    </label>
-    <label class="speed-row">Speed
-      <select id="speed">
-        <option value="fast" selected>Fast</option>
-        <option value="balanced">Balanced</option>
-        <option value="accurate">Accurate</option>
-      </select>
-    </label>
-
-    <div class="big-actions">
-      <button id="btn-check" class="btn start" type="button">Check this frame</button>
-      <button id="btn-live" class="btn" type="button" aria-pressed="false">Keep checking</button>
-    </div>
-    <p id="msg" class="msg" aria-live="polite"></p>
-    <div id="counts" class="class-list"></div>
   </div>
 </section>
 {% endblock %}

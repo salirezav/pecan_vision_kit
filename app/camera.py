@@ -305,3 +305,41 @@ class CameraService:
             timeout=5,
         )
         return f"{name}={value_str}"
+
+    def apply_v4l_values(self, values: dict[str, Any]) -> list[dict[str, Any]]:
+        """Set many controls. Auto modes go first so locked sliders can be written."""
+        wanted: dict[str, int] = {}
+        for name, raw in values.items():
+            key = str(name)
+            if not key.replace("_", "").isalnum():
+                continue
+            try:
+                wanted[key] = int(raw)
+            except (TypeError, ValueError):
+                continue
+        controls = self.list_v4l_controls()
+        for _ in range(2):
+            by_name = {c["name"]: c for c in controls if c.get("name") and "error" not in c}
+            names = [name for name in wanted if name in by_name]
+            names.sort(key=lambda name: 0 if by_name[name].get("type") in {"bool", "menu"} else 1)
+            changed = False
+            for name in names:
+                ctrl = by_name[name]
+                if ctrl.get("inactive"):
+                    continue
+                target = wanted[name]
+                try:
+                    current = int(ctrl.get("value"))
+                except (TypeError, ValueError):
+                    current = None
+                if current == target:
+                    continue
+                try:
+                    self.set_v4l_control(name, target)
+                    changed = True
+                except (subprocess.SubprocessError, OSError, ValueError):
+                    continue
+            controls = self.list_v4l_controls()
+            if not changed:
+                break
+        return controls

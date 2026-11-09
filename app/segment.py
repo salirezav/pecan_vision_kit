@@ -17,6 +17,7 @@ import pickle
 import shutil
 import threading
 import time
+import uuid
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,8 @@ os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 
 STORE_DIR = Path("/mnt/recordings/models")
 MAX_UPLOAD_BYTES = 800 * 1024 * 1024
+MAX_METRICS = 8
+_METRIC_MEASURES = frozenset({"area", "count"})
 
 # (class name, default resolution, decoder layers, queries)
 _SEG_SPECS: tuple[tuple[str, int, int, int], ...] = (
@@ -605,6 +608,9 @@ class ModelService:
     def meta_path(self) -> Path:
         return self.store_dir / "current.json"
 
+    def metrics_path(self) -> Path:
+        return self.store_dir / "metrics.json"
+
     def ensure_seeded(self) -> None:
         with self._lock:
             dest = self.weights_path()
@@ -726,6 +732,64 @@ class ModelService:
         self.meta_path().write_text(json.dumps(meta, indent=2))
         return self.status()
 
+    def list_metrics(self) -> list[dict[str, Any]]:
+        path = self.metrics_path()
+        if not path.is_file():
+            return []
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return []
+        if not isinstance(data, list):
+            return []
+        return [row for row in data if isinstance(row, dict)]
+
+    def save_metrics(self, raw: Any) -> list[dict[str, Any]]:
+        if not isinstance(raw, list):
+            raise ValueError("Send a list of metrics.")
+        if len(raw) > MAX_METRICS:
+            raise ValueError(f"Keep at most {MAX_METRICS} metrics.")
+        self.ensure_seeded()
+        allowed = {str(name) for name in (self._read_meta().get("class_names") or []) if str(name).strip()}
+        if not allowed:
+            raise ValueError("Upload a model with class names before saving metrics.")
+        existing = {
+            str(row.get("id") or ""): row
+            for row in self.list_metrics()
+            if isinstance(row, dict) and row.get("id")
+        }
+        cleaned: list[dict[str, Any]] = []
+        for index, row in enumerate(raw):
+            if not isinstance(row, dict):
+                raise ValueError(f"Metric {index + 1} is not an object.")
+            name = str(row.get("name") or "").strip()
+            if not name:
+                raise ValueError(f"Metric {index + 1} needs a name.")
+            measure = str(row.get("measure") or "").strip().lower()
+            if measure not in _METRIC_MEASURES:
+                raise ValueError(f"Metric {name!r} measure must be area or count.")
+            metric_id = str(row.get("id") or "").strip() or uuid.uuid4().hex
+            previous = existing.get(metric_id)
+            label_allowed = set(allowed)
+            if previous:
+                for side in ("numerator", "denominator"):
+                    for label in previous.get(side) or []:
+                        label_allowed.add(str(label))
+            numerator = _metric_labels(row.get("numerator"), "numerator", name, label_allowed)
+            denominator = _metric_labels(row.get("denominator"), "denominator", name, label_allowed)
+            cleaned.append(
+                {
+                    "id": metric_id,
+                    "name": name,
+                    "measure": measure,
+                    "numerator": numerator,
+                    "denominator": denominator,
+                }
+            )
+        self.store_dir.mkdir(parents=True, exist_ok=True)
+        self.metrics_path().write_text(json.dumps(cleaned, indent=2))
+        return cleaned
+
     def predict_jpeg(
         self,
         jpeg: bytes,
@@ -753,9 +817,11 @@ class ModelService:
             task = str(meta.get("task") or "segment")
             if family == "ultralytics":
                 infer_size = yolo_infer_size(int(meta.get("resolution") or 640), speed_key)
-                annotated, items = _run_ultralytics(model, frame, threshold, labels, infer_size, task)
+                annotated, items, class_areas = _run_ultralytics(
+                    model, frame, threshold, labels, infer_size, task
+                )
             else:
-                annotated, items = _run_model(
+                annotated, items, class_areas = _run_model(
                     model,
                     frame,
                     threshold,
@@ -778,6 +844,7 @@ class ModelService:
         if result_mode == "counts":
             for item in items:
                 counts[item["class"]] = counts.get(item["class"], 0) + 1
+        measurements = _build_measurements(labels, counts, class_areas, result_mode)
         return {
             "ok": True,
             "elapsed_ms": elapsed_ms,
@@ -787,6 +854,7 @@ class ModelService:
             "result_mode": result_mode,
             "counts": [{"class": name, "count": count} for name, count in counts.items()],
             "areas": items if result_mode == "areas" else [],
+            "measurements": measurements,
             "items": items[:40],
             "best": best,
             "match": match if result_mode == "scores" else None,
@@ -921,6 +989,52 @@ def _as_numpy(value: Any) -> np.ndarray:
     return np.asarray(value)
 
 
+def _metric_labels(
+    raw: Any,
+    side: str,
+    metric_name: str,
+    allowed: set[str],
+) -> list[str]:
+    if not isinstance(raw, list) or not raw:
+        raise ValueError(f"Metric {metric_name!r} needs at least one {side} label.")
+    labels: list[str] = []
+    seen: set[str] = set()
+    for entry in raw:
+        label = str(entry or "").strip()
+        if not label:
+            continue
+        if label not in allowed:
+            raise ValueError(f"Metric {metric_name!r} uses unknown label {label!r}.")
+        if label in seen:
+            continue
+        seen.add(label)
+        labels.append(label)
+    if not labels:
+        raise ValueError(f"Metric {metric_name!r} needs at least one {side} label.")
+    return labels
+
+
+def _build_measurements(
+    labels: list[str],
+    counts: dict[str, int],
+    class_areas: dict[str, int],
+    result_mode: str,
+) -> list[dict[str, Any]]:
+    """One row per class for ratio metrics. Classify and depth leave this empty."""
+    if result_mode in {"scores", "depth"}:
+        return []
+    rows: list[dict[str, Any]] = []
+    for name in labels:
+        rows.append(
+            {
+                "class": name,
+                "count": int(counts.get(name, 0)),
+                "area": int(class_areas.get(name, 0)),
+            }
+        )
+    return rows
+
+
 def _run_ultralytics(
     model: Any,
     bgr: np.ndarray,
@@ -928,7 +1042,7 @@ def _run_ultralytics(
     labels: list[str],
     infer_size: int,
     task: str,
-) -> tuple[np.ndarray, list[dict[str, Any]]]:
+) -> tuple[np.ndarray, list[dict[str, Any]], dict[str, int]]:
     kwargs: dict[str, Any] = {
         "imgsz": int(infer_size),
         "device": "cpu",
@@ -945,17 +1059,18 @@ def _run_ultralytics(
     if result is None:
         raise RuntimeError("The model did not return a result.")
     if task == "classify":
-        return _classify_result(result, bgr, labels)
+        annotated, items = _classify_result(result, bgr, labels)
+        return annotated, items, {}
     if task == "semantic":
         semantic = getattr(result, "semantic_mask", None)
         if semantic is None or getattr(semantic, "data", None) is None:
-            return bgr.copy(), []
+            return bgr.copy(), [], {}
         return _draw_semantic(bgr, _as_numpy(semantic.data), labels)
     if task == "depth":
         depth = getattr(result, "depth", None)
         if depth is None or getattr(depth, "data", None) is None:
-            return bgr.copy(), []
-        return _colorize_depth(bgr, _as_numpy(depth.data)), []
+            return bgr.copy(), [], {}
+        return _colorize_depth(bgr, _as_numpy(depth.data)), [], {}
     return _draw_ultralytics_instances(result, bgr, labels, task)
 
 
@@ -997,7 +1112,7 @@ def _draw_semantic(
     frame: np.ndarray,
     mask: np.ndarray,
     labels: list[str],
-) -> tuple[np.ndarray, list[dict[str, Any]]]:
+) -> tuple[np.ndarray, list[dict[str, Any]], dict[str, int]]:
     if mask.ndim == 3:
         mask = mask[0]
     mask = mask.astype(np.int32)
@@ -1005,6 +1120,7 @@ def _draw_semantic(
         mask = cv2.resize(mask, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_NEAREST)
     overlay = frame.copy()
     areas: list[dict[str, Any]] = []
+    class_areas: dict[str, int] = {}
     total = int(mask.size) or 1
     class_ids = sorted(int(value) for value in np.unique(mask) if int(value) >= 0 and int(value) != 255)
     for class_id in class_ids:
@@ -1015,8 +1131,9 @@ def _draw_semantic(
         overlay[region] = _COLORS[class_id % len(_COLORS)]
         name = labels[class_id] if class_id < len(labels) else f"Class {class_id + 1}"
         areas.append({"class": name, "share": round(pixels / total, 4)})
+        class_areas[name] = pixels
     areas.sort(key=lambda item: item["share"], reverse=True)
-    return cv2.addWeighted(overlay, 0.45, frame, 0.55, 0), areas
+    return cv2.addWeighted(overlay, 0.45, frame, 0.55, 0), areas, class_areas
 
 
 def _colorize_depth(frame: np.ndarray, depth: np.ndarray) -> np.ndarray:
@@ -1042,7 +1159,7 @@ def _draw_ultralytics_instances(
     frame: np.ndarray,
     labels: list[str],
     task: str,
-) -> tuple[np.ndarray, list[dict[str, Any]]]:
+) -> tuple[np.ndarray, list[dict[str, Any]], dict[str, int]]:
     boxes = None
     corners = None
     if task == "obb" and getattr(result, "obb", None) is not None and len(result.obb):
@@ -1053,7 +1170,7 @@ def _draw_ultralytics_instances(
     else:
         detected = getattr(result, "boxes", None)
         if detected is None or len(detected) == 0:
-            return frame.copy(), []
+            return frame.copy(), [], {}
         class_ids = _as_numpy(detected.cls).astype(int).reshape(-1)
         confidences = _as_numpy(detected.conf).astype(float).reshape(-1)
         boxes = _as_numpy(detected.xyxy).astype(float)
@@ -1071,6 +1188,7 @@ def _draw_ultralytics_instances(
     drew_mask = False
     items: list[dict[str, Any]] = []
     pending: list[tuple[int, float, str, tuple[int, int, int], tuple[int, int]]] = []
+    polygons_by_class: dict[str, list[np.ndarray]] = {}
     for index, class_id in enumerate(class_ids):
         class_id = int(class_id)
         confidence = float(confidences[index]) if index < len(confidences) else 0.0
@@ -1081,6 +1199,7 @@ def _draw_ultralytics_instances(
             if pts.ndim == 2 and len(pts) >= 3:
                 cv2.fillPoly(overlay, [pts], color)
                 drew_mask = True
+                polygons_by_class.setdefault(name, []).append(pts)
         anchor = _label_anchor(boxes, corners, index)
         pending.append((class_id, confidence, name, color, anchor))
         items.append({"class": name, "confidence": round(confidence, 3)})
@@ -1110,7 +1229,25 @@ def _draw_ultralytics_instances(
             cv2.LINE_AA,
         )
     items.sort(key=lambda item: item["confidence"], reverse=True)
-    return annotated, items
+    class_areas = _union_polygon_areas(frame.shape[:2], polygons_by_class)
+    return annotated, items, class_areas
+
+
+def _union_polygon_areas(
+    shape: tuple[int, int],
+    polygons_by_class: dict[str, list[np.ndarray]],
+) -> dict[str, int]:
+    if not polygons_by_class:
+        return {}
+    height, width = shape
+    scratch = np.zeros((height, width), dtype=np.uint8)
+    areas: dict[str, int] = {}
+    for name, polys in polygons_by_class.items():
+        scratch.fill(0)
+        for pts in polys:
+            cv2.fillPoly(scratch, [pts], 1)
+        areas[name] = int(scratch.sum())
+    return areas
 
 
 def _label_anchor(boxes: np.ndarray | None, corners: np.ndarray | None, index: int) -> tuple[int, int]:
@@ -1128,7 +1265,7 @@ def _run_model(
     threshold: float,
     labels: list[str],
     infer_size: int | None = None,
-) -> tuple[np.ndarray, list[dict[str, Any]]]:
+) -> tuple[np.ndarray, list[dict[str, Any]], dict[str, int]]:
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
     predict_kwargs: dict[str, Any] = {
         "threshold": threshold,
@@ -1142,7 +1279,7 @@ def _run_model(
     annotated = bgr.copy()
     items: list[dict[str, Any]] = []
     if detections is None or getattr(detections, "xyxy", None) is None or len(detections) == 0:
-        return annotated, items
+        return annotated, items, {}
 
     class_ids = np.asarray(detections.class_id)
     confidences = np.asarray(detections.confidence)
@@ -1152,6 +1289,7 @@ def _run_model(
 
     overlay = annotated.copy()
     drew_mask = False
+    union_masks: dict[str, np.ndarray] = {}
     if masks is not None:
         mask_list = np.asarray(masks)
         for index in keep:
@@ -1168,8 +1306,13 @@ def _run_model(
                     (annotated.shape[1], annotated.shape[0]),
                     interpolation=cv2.INTER_NEAREST,
                 )
-            overlay[region.astype(bool)] = color
+            region_bool = region.astype(bool)
+            overlay[region_bool] = color
             drew_mask = True
+            name = labels[class_id] if 0 <= class_id < len(labels) else f"Class {class_id + 1}"
+            if name not in union_masks:
+                union_masks[name] = np.zeros(annotated.shape[:2], dtype=bool)
+            union_masks[name] |= region_bool
     if drew_mask:
         annotated = cv2.addWeighted(overlay, 0.45, annotated, 0.55, 0)
 
@@ -1196,4 +1339,5 @@ def _run_model(
         )
         items.append({"class": name, "confidence": round(confidence, 3)})
     items.sort(key=lambda item: item["confidence"], reverse=True)
-    return annotated, items
+    class_areas = {name: int(mask.sum()) for name, mask in union_masks.items()}
+    return annotated, items, class_areas

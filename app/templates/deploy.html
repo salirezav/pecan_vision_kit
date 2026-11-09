@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Deploy — Pecan Vision Kit {{ kit_id }}{% endblock %}
+{% block content %}
+<section class="deploy-layout">
+  <div class="controls deploy-controls">
+    <div class="deploy-controls-main">
+      <p class="hint">Live monitoring for metrics you set up on the <a href="{{ url_for('model_page') }}">Model</a> page. Start a run to fill the charts below.</p>
+      <p id="model-status" class="msg">Looking for a model…</p>
+      <div id="model-card" class="model-card deploy-model-card" hidden>
+        <div class="deploy-model-info">
+          <p id="model-kind" class="model-kind"></p>
+          <p id="model-does" class="model-summary"></p>
+          <ul id="class-chips" class="class-chips"></ul>
+        </div>
+        <dl class="meta deploy-meta">
+          <div><dt>Frames</dt><dd id="meta-frames">0</dd></div>
+          <div><dt>Last check</dt><dd id="meta-elapsed">—</dd></div>
+          <div><dt>Metrics</dt><dd id="meta-metrics">0</dd></div>
+          <div><dt>Status</dt><dd id="meta-live">Idle</dd></div>
+        </dl>
+      </div>
+      <p id="msg" class="msg" aria-live="polite"></p>
+    </div>
+
+    <div class="deploy-controls-run">
+      <label id="confidence-row" class="threshold-row deploy-field"><span id="confidence-label">Confidence</span>
+        <input id="threshold" type="range" min="0.05" max="0.95" step="0.05" value="0.50">
+        <span id="threshold-value">50%</span>
+      </label>
+      <label class="speed-row deploy-field">Speed
+        <select id="speed">
+          <option value="fast" selected>Fast</option>
+          <option value="balanced">Balanced</option>
+          <option value="accurate">Accurate</option>
+        </select>
+      </label>
+      <div class="deploy-actions">
+        <button id="btn-start" class="btn primary" type="button">Start live run</button>
+        <button id="btn-stop" class="btn danger" type="button" disabled>Stop live run</button>
+        <button id="btn-reset-run" class="btn" type="button">Reset charts</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="model-views deploy-views">
+    <div class="preview-wrap">
+      <img class="preview" src="{{ url_for('video_feed') }}" alt="Live camera preview">
+      <div class="preview-caption">Live camera</div>
+    </div>
+    <div class="preview-wrap">
+      <img id="result" class="preview" alt="Model result" hidden>
+      <div id="result-empty" class="result-empty">Start live inference to see the model result here.</div>
+      <div id="result-caption" class="preview-caption">Model result</div>
+    </div>
+  </div>
+
+  <section class="grafana-board">
+    <div class="grafana-board-head">
+      <h1>Live metrics</h1>
+      <p id="grafana-note" class="hint">Save metrics on the Model page to see them here.</p>
+    </div>
+    <div id="grafana-grid" class="grafana-grid"></div>
+  </section>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='deploy.js') }}"></script>
+{% endblock %}

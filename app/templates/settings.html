@@ -46,12 +46,42 @@
 
         <div class="row-actions">
           <button class="btn primary" type="submit">Save settings</button>
+          <button class="btn" type="submit" name="action" value="reset" id="btn-reset"
+            data-confirm="Reset to {{ defaults.width }}×{{ defaults.height }} at {{ defaults.fps }} fps, and save folder {{ defaults.save_dir }}? A recording in progress will restart.">
+            Reset to default
+          </button>
           <button type="button" class="btn small" id="btn-analyze">Check storage speed</button>
         </div>
       </form>
 
       <div id="storage-status" class="storage-status" hidden></div>
       <p class="hint">Tip for fast pecan lines: try <strong>1280×720 at 60–120 fps</strong> on kit storage. Higher fps = larger files and needs a faster drive.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Saved setups</h2>
+      <p class="hint">Name the resolution, frame rate, save folder, and camera picture that are in use now. Load a name later to put that setup back.</p>
+      <div class="form-grid">
+        <label>
+          Name
+          <input id="preset-name" type="text" maxlength="40" autocomplete="off" spellcheck="false" placeholder="Morning line">
+        </label>
+        <label>
+          Saved
+          <select id="preset-list">
+            <option value="">{{ 'Choose a saved setup' if preset_names else 'No saved setups yet' }}</option>
+            {% for name in preset_names %}
+            <option value="{{ name }}">{{ name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <div class="row-actions">
+          <button type="button" class="btn primary" id="btn-preset-save">Save setup</button>
+          <button type="button" class="btn" id="btn-preset-load">Load</button>
+          <button type="button" class="btn small danger" id="btn-preset-delete">Delete</button>
+        </div>
+        <p id="preset-status" class="msg" aria-live="polite"></p>
+      </div>
     </section>
 
     <section class="panel">
@@ -96,6 +126,10 @@
   const fpsSel = document.getElementById('fps-select');
   const saveInput = document.getElementById('save-dir-input');
   const statusBox = document.getElementById('storage-status');
+  const presetName = document.getElementById('preset-name');
+  const presetList = document.getElementById('preset-list');
+  const presetStatus = document.getElementById('preset-status');
+  const resetBtn = document.getElementById('btn-reset');
 
   function syncHeight() {
     const opt = sel.options[sel.selectedIndex];
@@ -103,6 +137,14 @@
   }
   sel.addEventListener('change', syncHeight);
   syncHeight();
+
+  if (resetBtn) {
+    resetBtn.addEventListener('click', (event) => {
+      if (!window.confirm(resetBtn.dataset.confirm || 'Reset settings?')) {
+        event.preventDefault();
+      }
+    });
+  }
 
   async function runAnalyze() {
     statusBox.hidden = false;
@@ -135,6 +177,112 @@
       saveInput.value = data.save_dir;
       if (data.analysis) window.PecanStorage.renderAnalysis(statusBox, data.analysis);
     });
+  });
+
+  function setPresetStatus(text, isError) {
+    presetStatus.textContent = text || '';
+    presetStatus.classList.toggle('err', Boolean(isError));
+    presetStatus.classList.toggle('ok', Boolean(text) && !isError);
+  }
+
+  function fillPresets(names, selected) {
+    const keep = selected || presetList.value;
+    presetList.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = names.length ? 'Choose a saved setup' : 'No saved setups yet';
+    presetList.appendChild(placeholder);
+    for (const name of names) {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      if (name === keep) opt.selected = true;
+      presetList.appendChild(opt);
+    }
+  }
+
+  function showRecording(status) {
+    const width = String(status.width);
+    const frameHeight = String(status.height);
+    for (const opt of sel.options) {
+      opt.selected = opt.value === width && opt.getAttribute('data-height') === frameHeight;
+    }
+    syncHeight();
+    fpsSel.value = String(status.fps);
+    if (status.save_dir) saveInput.value = status.save_dir;
+  }
+
+  async function presetAction(action, name) {
+    const res = await fetch('/api/settings/presets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, name }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Could not update saved setups');
+    return data;
+  }
+
+  presetList.addEventListener('change', () => {
+    if (presetList.value) presetName.value = presetList.value;
+  });
+
+  document.getElementById('btn-preset-save').addEventListener('click', async () => {
+    const name = presetName.value.trim();
+    if (!name) {
+      setPresetStatus('Enter a name first.', true);
+      presetName.focus();
+      return;
+    }
+    const exists = [...presetList.options].some((opt) => opt.value === name);
+    if (exists && !window.confirm('Replace the saved setup “' + name + '”?')) return;
+    setPresetStatus('Saving ' + name + '…');
+    try {
+      const data = await presetAction('save', name);
+      fillPresets(data.names || [], data.name);
+      presetName.value = data.name || name;
+      setPresetStatus('Saved ' + (data.name || name) + '.');
+    } catch (err) {
+      setPresetStatus(err.message || String(err), true);
+    }
+  });
+
+  document.getElementById('btn-preset-load').addEventListener('click', async () => {
+    const name = presetList.value || presetName.value.trim();
+    if (!name) {
+      setPresetStatus('Choose a saved setup first.', true);
+      return;
+    }
+    if (!window.confirm('Load “' + name + '”? A recording in progress will restart.')) return;
+    setPresetStatus('Loading ' + name + '…');
+    try {
+      const data = await presetAction('load', name);
+      if (data.status) showRecording(data.status);
+      if (window.PecanControls) window.PecanControls.render(data.controls || []);
+      fillPresets(data.names || [], name);
+      presetName.value = name;
+      setPresetStatus('Loaded ' + name + '.');
+    } catch (err) {
+      setPresetStatus(err.message || String(err), true);
+    }
+  });
+
+  document.getElementById('btn-preset-delete').addEventListener('click', async () => {
+    const name = presetList.value || presetName.value.trim();
+    if (!name) {
+      setPresetStatus('Choose a saved setup first.', true);
+      return;
+    }
+    if (!window.confirm('Delete the saved setup “' + name + '”?')) return;
+    setPresetStatus('Deleting ' + name + '…');
+    try {
+      const data = await presetAction('delete', name);
+      fillPresets(data.names || [], '');
+      if (presetName.value.trim() === name) presetName.value = '';
+      setPresetStatus('Deleted ' + name + '.');
+    } catch (err) {
+      setPresetStatus(err.message || String(err), true);
+    }
   });
 
   runAnalyze();
