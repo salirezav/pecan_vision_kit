@@ -23,17 +23,16 @@
   const metaMetrics = document.getElementById("meta-metrics");
   const metaLive = document.getElementById("meta-live");
 
-  const HISTORY = 90;
   const COLORS = ["#c4a35a", "#7dcea0", "#5dade2", "#f5b041", "#af7ac5", "#e74c3c", "#48c9b0", "#f4d03f"];
 
   let model = null;
   let metrics = [];
   let live = false;
-  let busy = false;
   let runFrames = 0;
   let runSums = {};
   let histories = {};
   let frameValues = {};
+  let pollTimer = null;
 
   function setMsg(text, kind) {
     msgEl.textContent = text || "";
@@ -69,17 +68,6 @@
     return [].concat(metric.numerator || [], metric.denominator || []).some((name) => !known.has(name));
   }
 
-  function measurementsMap(rows) {
-    const map = {};
-    (rows || []).forEach((row) => {
-      map[row.class] = {
-        count: Number(row.count || 0),
-        area: Number(row.area || 0),
-      };
-    });
-    return map;
-  }
-
   function sumLabels(source, labels, measure) {
     let total = 0;
     for (const name of labels) {
@@ -100,12 +88,6 @@
   function formatPercent(numerator, denominator) {
     if (!denominator) return "—";
     return ((numerator / denominator) * 100).toFixed(1) + "%";
-  }
-
-  function pushHistory(id, percent) {
-    if (!histories[id]) histories[id] = [];
-    histories[id].push(percent);
-    if (histories[id].length > HISTORY) histories[id].shift();
   }
 
   function chartSvg(points, color) {
@@ -196,33 +178,6 @@
     }).join("");
   }
 
-  function resetRun() {
-    runFrames = 0;
-    runSums = {};
-    histories = {};
-    frameValues = {};
-    renderBoard();
-  }
-
-  function addFrame(rows) {
-    const map = measurementsMap(rows);
-    Object.keys(map).forEach((name) => {
-      if (!runSums[name]) runSums[name] = { count: 0, area: 0 };
-      runSums[name].count += map[name].count;
-      runSums[name].area += map[name].area;
-    });
-    runFrames += 1;
-    metrics.forEach((metric) => {
-      const frame = ratioParts(metric, map);
-      frameValues[metric.id] = frame;
-      if (!frame || !frame.denominator) {
-        pushHistory(metric.id, null);
-        return;
-      }
-      pushHistory(metric.id, (frame.numerator / frame.denominator) * 100);
-    });
-  }
-
   function modelReady() {
     return Boolean(model && model.installed && model.library_ready);
   }
@@ -234,16 +189,38 @@
     resetBtn.disabled = live;
   }
 
-  function setLive(on) {
-    live = on;
-    syncLiveButtons();
-    renderBoard();
-  }
-
   function showResult(imageUrl) {
+    if (!imageUrl) return;
     resultEl.src = imageUrl;
     resultEl.hidden = false;
     emptyEl.hidden = true;
+  }
+
+  function applySnapshot(data) {
+    live = Boolean(data.running);
+    runFrames = Number(data.frames || 0);
+    runSums = data.run_sums || {};
+    histories = data.histories || {};
+    frameValues = data.frame_values || {};
+    metrics = data.metrics || metrics;
+    if (data.model) model = data.model;
+    if (data.threshold != null && document.activeElement !== thresholdEl) {
+      thresholdEl.value = String(data.threshold);
+      thresholdValue.textContent = Math.round(Number(thresholdEl.value) * 100) + "%";
+    }
+    if (data.speed && document.activeElement !== speedEl) {
+      speedEl.value = data.speed;
+    }
+    if (data.elapsed_ms != null) {
+      metaElapsed.textContent = (Number(data.elapsed_ms) / 1000).toFixed(1) + "s";
+    }
+    if (data.image) showResult(data.image);
+    if (data.error) setMsg(data.error, "err");
+    else if (live) setMsg("Live inference running.", "ok");
+    renderStatus();
+    renderBoard();
+    syncLiveButtons();
+    ensurePoll();
   }
 
   function renderStatus() {
@@ -278,54 +255,27 @@
     syncLiveButtons();
   }
 
-  async function refreshAll() {
-    const [modelRes, metricsRes] = await Promise.all([
-      fetch("/api/model"),
-      fetch("/api/model/metrics"),
-    ]);
-    const modelData = await modelRes.json();
-    const metricsData = await metricsRes.json();
-    if (!modelData.ok) throw new Error(modelData.error || "Could not read the model.");
-    if (!metricsData.ok) throw new Error(metricsData.error || "Could not read metrics.");
-    model = modelData;
-    metrics = metricsData.metrics || [];
-    renderStatus();
-    renderBoard();
+  function ensurePoll() {
+    if (live && !pollTimer) {
+      pollTimer = setInterval(() => refreshLive({ quiet: true }), 1000);
+    } else if (!live && pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
   }
 
-  async function runOnce() {
-    if (busy) return;
-    busy = true;
-    setMsg(model && model.loaded ? "Checking…" : "Loading the model, then checking. The first time can take a few minutes.", "");
+  async function refreshLive(opts) {
+    const quiet = opts && opts.quiet;
     try {
-      const response = await fetch("/api/model/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          threshold: Number(thresholdEl.value),
-          speed: speedEl ? speedEl.value : "fast",
-        }),
-      });
+      const response = await fetch("/api/deploy/live");
       const data = await response.json();
-      if (!response.ok || !data.ok) {
-        if (response.status === 409 && live) {
-          setMsg(data.error || "Still working…", "");
-          return;
-        }
-        throw new Error(data.error || "The model could not check this frame.");
-      }
-      if (model) model.loaded = true;
-      showResult(data.image);
-      metaElapsed.textContent = (data.elapsed_ms / 1000).toFixed(1) + "s";
-      addFrame(data.measurements || []);
-      renderBoard();
-      if (live) setMsg("Live inference running.", "ok");
+      if (!data.ok) throw new Error(data.error || "Could not read live status.");
+      applySnapshot(data);
     } catch (err) {
-      setMsg(err.message || String(err), "err");
-      setLive(false);
-    } finally {
-      busy = false;
-      syncLiveButtons();
+      if (!quiet) {
+        statusEl.textContent = err.message || String(err);
+        statusEl.className = "msg err";
+      }
     }
   }
 
@@ -335,29 +285,51 @@
 
   startBtn.addEventListener("click", async () => {
     if (live || !modelReady()) return;
-    resetRun();
-    setLive(true);
-    setMsg("Live inference running.", "ok");
-    while (live) {
-      if (!busy) await runOnce();
-      if (!live) break;
-      await new Promise((resolve) => setTimeout(resolve, 400));
+    setMsg("Starting live run…", "");
+    try {
+      const response = await fetch("/api/deploy/live/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          threshold: Number(thresholdEl.value),
+          speed: speedEl ? speedEl.value : "fast",
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || "Could not start live run.");
+      applySnapshot(data);
+      setMsg("Live inference running.", "ok");
+    } catch (err) {
+      setMsg(err.message || String(err), "err");
     }
   });
 
-  stopBtn.addEventListener("click", () => {
-    if (!live) return;
-    setLive(false);
-    setMsg("Live run stopped.", "ok");
+  stopBtn.addEventListener("click", async () => {
+    try {
+      const response = await fetch("/api/deploy/live/stop", { method: "POST" });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || "Could not stop live run.");
+      applySnapshot(data);
+      setMsg("Live run stopped.", "ok");
+    } catch (err) {
+      setMsg(err.message || String(err), "err");
+    }
   });
 
-  resetBtn.addEventListener("click", () => {
+  resetBtn.addEventListener("click", async () => {
     if (live) return;
-    resetRun();
-    setMsg("Charts cleared.", "ok");
+    try {
+      const response = await fetch("/api/deploy/live/reset", { method: "POST" });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || "Could not reset charts.");
+      applySnapshot(data);
+      setMsg("Charts cleared.", "ok");
+    } catch (err) {
+      setMsg(err.message || String(err), "err");
+    }
   });
 
-  refreshAll().catch((err) => {
+  refreshLive().catch((err) => {
     statusEl.textContent = err.message || String(err);
     statusEl.className = "msg err";
   });

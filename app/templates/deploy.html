@@ -4,7 +4,7 @@
 <section class="deploy-layout">
   <div class="controls deploy-controls">
     <div class="deploy-controls-main">
-      <p class="hint">Live monitoring for metrics you set up on the <a href="{{ url_for('model_page') }}">Model</a> page. Start a run to fill the charts below.</p>
+      <p class="hint">Live monitoring for metrics you set up on the <a href="{{ url_for('ui.model_page') }}">Model</a> page. Start a run to fill the charts below.</p>
       <p id="model-status" class="msg">Looking for a model…</p>
       <div id="model-card" class="model-card deploy-model-card" hidden>
         <div class="deploy-model-info">
@@ -44,7 +44,7 @@
 
   <div class="model-views deploy-views">
     <div class="preview-wrap">
-      <img class="preview" src="{{ url_for('video_feed') }}" alt="Live camera preview">
+      <img class="preview" src="{{ url_for('camera.video_feed') }}" alt="Live camera preview">
       <div class="preview-caption">Live camera</div>
     </div>
     <div class="preview-wrap">

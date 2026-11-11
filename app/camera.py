@@ -66,8 +66,12 @@ class CameraService:
     _writer: cv2.VideoWriter | None = field(default=None, init=False, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
     _frame: Any = field(default=None, init=False, repr=False)
+    _preview_jpeg: bytes | None = field(default=None, init=False, repr=False)
+    _preview_interval_s: float = field(default=1.0 / 30.0, init=False, repr=False)
+    _last_preview_at: float = field(default=0.0, init=False, repr=False)
     _running: bool = field(default=False, init=False, repr=False)
     _recording: bool = field(default=False, init=False, repr=False)
+    _record_generation: int = field(default=0, init=False, repr=False)
     _thread: threading.Thread | None = field(default=None, init=False, repr=False)
     _current_file: str | None = field(default=None, init=False, repr=False)
     _frames_written: int = field(default=0, init=False, repr=False)
@@ -157,13 +161,45 @@ class CameraService:
                 self._last_error = "Camera read failed — check USB cable / power"
                 time.sleep(0.05)
                 continue
+
+            writer = None
+            generation = 0
+            encode_preview = False
+            now = time.perf_counter()
             with self._lock:
                 self._frame = frame
                 if self._recording and self._writer is not None:
-                    self._writer.write(frame)
-                    self._frames_written += 1
+                    writer = self._writer
+                    generation = self._record_generation
+                if now - self._last_preview_at >= self._preview_interval_s:
+                    encode_preview = True
+                    self._last_preview_at = now
+
+            # Write and JPEG encode outside the lock so get_jpeg / status stay responsive.
+            if writer is not None:
+                writer.write(frame)
+                with self._lock:
+                    if (
+                        self._recording
+                        and self._writer is writer
+                        and self._record_generation == generation
+                    ):
+                        self._frames_written += 1
+
+            if encode_preview:
+                ok_jpeg, buf = cv2.imencode(
+                    ".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80]
+                )
+                if ok_jpeg:
+                    with self._lock:
+                        self._preview_jpeg = buf.tobytes()
 
     def get_jpeg(self, quality: int = 80) -> bytes | None:
+        if quality == 80:
+            with self._lock:
+                preview = self._preview_jpeg
+            if preview is not None:
+                return preview
         with self._lock:
             frame = None if self._frame is None else self._frame.copy()
         if frame is None:
@@ -187,6 +223,7 @@ class CameraService:
             self._writer = writer
             self._current_file = path
             self._frames_written = 0
+            self._record_generation += 1
             self._recording = True
             return path
 
@@ -204,6 +241,7 @@ class CameraService:
             self._writer.release()
             self._writer = None
         self._recording = False
+        self._record_generation += 1
         return info
 
     def status(self) -> dict[str, Any]:

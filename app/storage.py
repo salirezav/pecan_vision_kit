@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from convert import list_active_jobs, read_job
+from convert import list_active_jobs, preview_cache_path, queue_preview, read_job
 
 VIDEO_EXTENSIONS = {".avi", ".mp4", ".mkv", ".mov", ".webm", ".m4v"}
 SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\- ]{0,180}$")
@@ -353,16 +353,10 @@ def is_browser_native_video(path: Path) -> bool:
     return False
 
 
-def preview_cache_path(source: Path) -> Path:
-    cache_dir = source.parent / ".previews"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    return cache_dir / f"{source.name}.mp4"
-
-
-def ensure_browser_playable(source: Path) -> Path:
+def ensure_browser_playable(source: Path) -> Path | dict[str, Any]:
     """
-    Return a path Chromium can play. AVI/MJPEG (our recorder default) is
-    remuxed/transcoded once to H.264 MP4 and cached beside the original.
+    Return a path Chromium can play, or a converting job dict when a preview
+    encode was queued (AVI/MJPEG needs a one-time H.264 cache).
     """
     source = Path(source)
     if not source.exists():
@@ -377,40 +371,10 @@ def ensure_browser_playable(source: Path) -> Path:
     except OSError:
         pass
 
-    preview.parent.mkdir(parents=True, exist_ok=True)
-    # Must end in .mp4 so ffmpeg selects the MP4 muxer.
-    tmp = preview.with_name(preview.name + ".partial.mp4")
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-i",
-        str(source),
-        "-an",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "ultrafast",
-        "-pix_fmt",
-        "yuv420p",
-        "-movflags",
-        "+faststart",
-        "-f",
-        "mp4",
-        str(tmp),
-    ]
-    try:
-        subprocess.check_call(cmd, timeout=600)
-        tmp.replace(preview)
-    except Exception:
-        try:
-            tmp.unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise
-    return preview
+    job = read_job(preview)
+    if job and job.get("status") == "converting":
+        return job
+    return queue_preview(source)
 
 
 def delete_preview_for(source: Path) -> None:

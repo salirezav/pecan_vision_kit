@@ -5,6 +5,7 @@ __pycache__/
 config/ap-credentials.txt
 hand-off.md
 RELEASE-HOWTO.md
+ARCHITECTURE.md
 *.avi
 *.pt
 *.pth

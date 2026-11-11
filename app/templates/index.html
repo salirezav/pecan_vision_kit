@@ -3,7 +3,7 @@
 {% block content %}
 <section class="hero-record">
   <div class="preview-wrap">
-    <img class="preview" src="{{ url_for('video_feed') }}" alt="Live camera preview">
+    <img class="preview" src="{{ url_for('camera.video_feed') }}" alt="Live camera preview">
     <div id="rec-badge" class="rec-badge {% if status.recording %}on{% endif %}">
       {% if status.recording %}RECORDING{% else %}READY{% endif %}
     </div>

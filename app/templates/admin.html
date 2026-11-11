@@ -3,7 +3,7 @@
 {% block content %}
 <section class="panel">
   <h1>Admin & troubleshooting</h1>
-  <p class="hint">For trainers / IT. Attendees usually only need the <a href="{{ url_for('index') }}">Record</a> page.</p>
+  <p class="hint">For trainers / IT. Attendees usually only need the <a href="{{ url_for('ui.index') }}">Record</a> page.</p>
 </section>
 
 <section class="panel">
@@ -103,7 +103,7 @@ lsusb | grep -i shutter</pre>
       const action = btn.getAttribute('data-svc');
       const out = document.getElementById('svc-out');
       out.textContent = 'Working…';
-      const res = await fetch('{{ url_for("admin_service") }}', {
+      const res = await fetch('{{ url_for("system.admin_service") }}', {
         method: 'POST',
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
         body: 'action=' + encodeURIComponent(action)

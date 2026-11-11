@@ -5,7 +5,7 @@
   <div class="model-stage">
     <div class="model-views">
       <div class="preview-wrap">
-        <img class="preview" src="{{ url_for('video_feed') }}" alt="Live camera preview">
+        <img class="preview" src="{{ url_for('camera.video_feed') }}" alt="Live camera preview">
         <div class="preview-caption">Live camera</div>
       </div>
       <div class="preview-wrap">
@@ -16,7 +16,7 @@
     </div>
 
     <div class="controls model-setup">
-      <p class="hint">Upload and test a model here. Save the metrics you care about, then open <a href="{{ url_for('deploy_page') }}">Deploy</a> for live Grafana-style charts.</p>
+      <p class="hint">Upload and test a model here. Save the metrics you care about, then open <a href="{{ url_for('ui.deploy_page') }}">Deploy</a> for live Grafana-style charts.</p>
       <p id="model-status" class="msg">Looking for a model…</p>
       <div id="model-card" class="model-card" hidden>
         <p id="model-kind" class="model-kind"></p>

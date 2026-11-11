@@ -12,13 +12,14 @@
       <span class="brand-mark">Pecan Vision</span>
       <span class="kit">Kit {{ kit_id|default('??') }}</span>
     </div>
+    <div id="activity-slot" class="activity-slot" aria-label="Active jobs"></div>
     <nav>
-      <a href="{{ url_for('index') }}">Record</a>
-      <a href="{{ url_for('model_page') }}">Model</a>
-      <a href="{{ url_for('deploy_page') }}">Deploy</a>
-      <a href="{{ url_for('videos_page') }}">Videos</a>
-      <a href="{{ url_for('settings_page') }}">Settings</a>
-      <a href="{{ url_for('admin_page') }}">Admin</a>
+      <a href="{{ url_for('ui.index') }}">Record</a>
+      <a href="{{ url_for('ui.model_page') }}">Model</a>
+      <a href="{{ url_for('ui.deploy_page') }}">Deploy</a>
+      <a href="{{ url_for('ui.videos_page') }}">Videos</a>
+      <a href="{{ url_for('ui.settings_page') }}">Settings</a>
+      <a href="{{ url_for('ui.admin_page') }}">Admin</a>
     </nav>
   </header>
   <main>
@@ -28,6 +29,7 @@
     <p>Videos save to the kit’s storage drive. Need help? Open <strong>Admin</strong>.</p>
     <p class="version">Software {{ app_version_label|default(app_version|default('?')) }}</p>
   </footer>
+  <script src="{{ url_for('static', filename='activity.js') }}" defer></script>
   <script src="{{ url_for('static', filename='update.js') }}" defer></script>
   {% block scripts %}{% endblock %}
 </body>

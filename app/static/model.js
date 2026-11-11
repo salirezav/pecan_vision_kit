@@ -42,6 +42,7 @@
   let model = null;
   let live = false;
   let busy = false;
+  let runAbort = null;
   let overrideNames = false;
   let metrics = [];
   let editingId = null;
@@ -451,6 +452,8 @@
     syncActionButtons();
     uploadBtn.disabled = true;
     setMsg(model && model.loaded ? "Checking this frame…" : "Loading the model, then checking this frame. The first time can take a few minutes.", "");
+    const controller = new AbortController();
+    runAbort = controller;
     try {
       const response = await fetch("/api/model/run", {
         method: "POST",
@@ -459,6 +462,7 @@
           threshold: Number(thresholdEl.value),
           speed: speedEl ? speedEl.value : "fast",
         }),
+        signal: controller.signal,
       });
       const data = await response.json();
       if (!response.ok || !data.ok) {
@@ -475,9 +479,13 @@
       renderMetrics();
       if (live) setMsg("Keep checking is running.", "ok");
     } catch (err) {
+      if (err && err.name === "AbortError") {
+        return;
+      }
       setMsg(err.message || String(err), "err");
       setLive(false);
     } finally {
+      if (runAbort === controller) runAbort = null;
       busy = false;
       uploadBtn.disabled = false;
       syncActionButtons();
@@ -569,7 +577,14 @@
   stopBtn.addEventListener("click", () => {
     if (!live) return;
     setLive(false);
+    if (runAbort) runAbort.abort();
     setMsg("Stopped checking.", "ok");
+  });
+
+  window.addEventListener("pagehide", () => {
+    if (!live && !busy) return;
+    setLive(false);
+    if (runAbort) runAbort.abort();
   });
 
   resetRunBtn.addEventListener("click", () => {

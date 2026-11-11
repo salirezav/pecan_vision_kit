@@ -146,7 +146,43 @@
       .replaceAll('"', "&quot;");
   }
 
-  function playVideo(name) {
+  let playPoll = null;
+
+  function stopPlayPoll() {
+    if (playPoll) {
+      clearTimeout(playPoll);
+      playPoll = null;
+    }
+  }
+
+  function stopPlayback() {
+    stopPlayPoll();
+    try {
+      player.pause();
+    } catch (_) {
+      /* ignore */
+    }
+    player.removeAttribute("src");
+    player.load();
+  }
+
+  function cancelPreviewOnLeave() {
+    stopPlayback();
+    try {
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon("/api/videos/preview/cancel");
+      } else {
+        fetch("/api/videos/preview/cancel", {
+          method: "POST",
+          keepalive: true,
+        });
+      }
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  async function playVideo(name) {
     const item = videos.find((v) => v.name === name);
     if (item && item.status === "converting") {
       setStatus("Still converting — it will be watchable when finished.", true);
@@ -156,7 +192,39 @@
     renderList();
     playerLabel.textContent = "Loading…";
     setStatus("");
+    stopPlayPoll();
     const url = "/videos/watch/" + encodeURIComponent(name) + "?t=" + Date.now();
+    try {
+      const probe = await fetch(url, { method: "GET", headers: { Accept: "application/json" } });
+      const contentType = (probe.headers.get("content-type") || "").toLowerCase();
+      if (contentType.includes("application/json")) {
+        const data = await probe.json();
+        if (probe.status === 409 || data.converting) {
+          setStatus(
+            data.error || "Still preparing a playable preview — try again in a moment.",
+            true
+          );
+          playerLabel.textContent = "Preparing preview…";
+          playPoll = setTimeout(() => playVideo(name), 2000);
+          ensurePoll();
+          return;
+        }
+        throw new Error(data.error || "Could not play this video.");
+      }
+      if (!probe.ok) {
+        throw new Error("Could not play this video.");
+      }
+      // Drop the probe body — the <video> element will stream the same URL.
+      try {
+        if (probe.body && probe.body.cancel) await probe.body.cancel();
+      } catch (_) {
+        /* ignore */
+      }
+    } catch (err) {
+      playerLabel.textContent = "Could not play: " + name;
+      setStatus(err.message || String(err), true);
+      return;
+    }
     player.removeAttribute("src");
     player.load();
     player.src = url;
@@ -286,4 +354,5 @@
   document.getElementById("btn-browse-save").addEventListener("click", () => {
     window.PecanBrowse.open(saveDir || "/mnt/recordings/videos", applySaveDir);
   });
+  window.addEventListener("pagehide", cancelPreviewOnLeave);
 })();
