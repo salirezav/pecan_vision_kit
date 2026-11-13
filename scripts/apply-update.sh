@@ -156,24 +156,23 @@ rsync -a --delete \
 chmod +x "$KIT_ROOT/scripts/"*.sh 2>/dev/null || true
 
 write_status "deps" "Refreshing Python dependencies"
-if [[ -x "$KIT_ROOT/.venv/bin/pip" ]]; then
-  if ! "$KIT_ROOT/.venv/bin/pip" install -r "$KIT_ROOT/app/requirements.txt"; then
-    restore_backup "$BACKUP_DIR"
-    fail "pip install failed; rolled back to $PREV_VERSION"
-  fi
-  # ultralytics asks for opencv-python. Put the headless camera build back
-  # only when that full package was actually installed.
-  if "$KIT_ROOT/.venv/bin/pip" show opencv-python >/dev/null 2>&1; then
-    "$KIT_ROOT/.venv/bin/pip" uninstall -y opencv-python || true
-    if ! "$KIT_ROOT/.venv/bin/pip" install --force-reinstall --no-deps "opencv-python-headless>=4.8"; then
-      restore_backup "$BACKUP_DIR"
-      fail "OpenCV restore failed; rolled back to $PREV_VERSION"
-    fi
-  fi
-fi
-
 USER_NAME="$(stat -c '%U' "$KIT_ROOT" 2>/dev/null || echo engr-ugaif)"
 HOME_DIR="$(getent passwd "$USER_NAME" | cut -d: -f6)"
+UV="$HOME_DIR/.local/bin/uv"
+if ! command -v uv >/dev/null 2>&1 && [[ ! -x "$UV" ]]; then
+  curl -LsSf https://astral.sh/uv/install.sh | sudo -u "$USER_NAME" env UV_INSTALL_DIR="$HOME_DIR/.local/bin" sh
+fi
+if command -v uv >/dev/null 2>&1; then
+  UV="$(command -v uv)"
+fi
+if [[ ! -x "$KIT_ROOT/.venv/bin/python" ]]; then
+  sudo -u "$USER_NAME" "$UV" venv --python python3 --system-site-packages "$KIT_ROOT/.venv"
+fi
+if ! sudo -u "$USER_NAME" "$UV" sync --directory "$KIT_ROOT" --frozen --inexact --no-install-project; then
+  restore_backup "$BACKUP_DIR"
+  fail "uv sync failed; rolled back to $PREV_VERSION"
+fi
+
 if [[ -f "$KIT_ROOT/systemd/pecan-vision.service" ]]; then
   TMP="$(mktemp)"
   sed \
