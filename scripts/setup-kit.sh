@@ -119,6 +119,25 @@ setup_venv() {
 
 prepare_nvme() {
   info "Checking storage at $NVME_DEV…"
+  local root_src boot_src
+  root_src="$(findmnt -no SOURCE / 2>/dev/null || true)"
+  boot_src="$(findmnt -no SOURCE /boot/firmware 2>/dev/null || true)"
+  # The kit image sometimes uses the NVMe as the OS disk (p1 boot, p2 root).
+  # Partition 1 is then the firmware volume, not a recordings disk.
+  if [[ "$root_src" == "$NVME_DEV"* || "$boot_src" == "$NVME_DEV"* ]]; then
+    warn "$NVME_DEV is the system disk (root: ${root_src:-unknown}). Not partitioning it."
+    warn "Recordings will stay in $MOUNT_POINT on the root filesystem."
+    if awk '{print $2}' /etc/fstab | grep -qx "$MOUNT_POINT"; then
+      sudo sed -i "\\|[[:space:]]${MOUNT_POINT}[[:space:]]|d" /etc/fstab
+      sudo systemctl daemon-reload
+      ok "Removed $MOUNT_POINT from /etc/fstab (it pointed at the system disk)"
+    fi
+    sudo mkdir -p "$MOUNT_POINT/videos"
+    sudo chown -R "$USER_NAME:$USER_NAME" "$MOUNT_POINT"
+    df -h "$MOUNT_POINT" || true
+    ok "Recordings directory ready"
+    return
+  fi
   if [[ ! -b "$NVME_DEV" ]]; then
     warn "No NVMe found at $NVME_DEV — skipping disk setup."
     sudo mkdir -p "$MOUNT_POINT/videos"
@@ -194,6 +213,7 @@ install_service() {
   local tmp
   tmp="$(mktemp)"
   sed \
+    -e "s|/home/engr-ugaif/pecan-vision-kit|$KIT_ROOT|g" \
     -e "s|/home/engr-ugaif|$HOME_DIR|g" \
     -e "s|User=engr-ugaif|User=$USER_NAME|g" \
     -e "s|Group=engr-ugaif|Group=$USER_NAME|g" \
@@ -219,9 +239,12 @@ install_service() {
   sudo systemctl daemon-reload
   sudo systemctl enable pecan-vision.service
   if ask_yn "Start / restart pecan-vision service now?" "y"; then
-    sudo systemctl restart pecan-vision.service
-    sleep 1
-    systemctl --no-pager --full status pecan-vision.service || true
+    if ! sudo systemctl restart pecan-vision.service; then
+      err "pecan-vision did not start. Check: journalctl -u pecan-vision -u mnt-recordings.mount"
+    else
+      sleep 1
+      systemctl --no-pager --full status pecan-vision.service || true
+    fi
   fi
   ok "Service installed"
 }

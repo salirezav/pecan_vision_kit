@@ -176,6 +176,7 @@ fi
 if [[ -f "$KIT_ROOT/systemd/pecan-vision.service" ]]; then
   TMP="$(mktemp)"
   sed \
+    -e "s|/home/engr-ugaif/pecan-vision-kit|$KIT_ROOT|g" \
     -e "s|/home/engr-ugaif|$HOME_DIR|g" \
     -e "s|User=engr-ugaif|User=$USER_NAME|g" \
     -e "s|Group=engr-ugaif|Group=$USER_NAME|g" \
