@@ -142,6 +142,8 @@ def _draw_ultralytics_instances(
     frame: np.ndarray,
     labels: list[str],
     task: str,
+    *,
+    draw: bool = True,
 ) -> tuple[np.ndarray, list[dict[str, Any]], dict[str, int]]:
     boxes = None
     corners = None
@@ -153,7 +155,7 @@ def _draw_ultralytics_instances(
     else:
         detected = getattr(result, "boxes", None)
         if detected is None or len(detected) == 0:
-            return frame.copy(), [], {}
+            return (frame.copy() if draw else frame), [], {}
         class_ids = _as_numpy(detected.cls).astype(int).reshape(-1)
         confidences = _as_numpy(detected.conf).astype(float).reshape(-1)
         boxes = _as_numpy(detected.xyxy).astype(float)
@@ -166,8 +168,8 @@ def _draw_ultralytics_instances(
     if points is not None and getattr(points, "xy", None) is not None:
         keypoints = _as_numpy(points.xy)
 
-    annotated = frame.copy()
-    overlay = annotated.copy()
+    annotated = frame.copy() if draw else frame
+    overlay = annotated.copy() if draw else None
     drew_mask = False
     items: list[dict[str, Any]] = []
     pending: list[tuple[int, float, str, tuple[int, int, int], tuple[int, int]]] = []
@@ -180,37 +182,39 @@ def _draw_ultralytics_instances(
         if polygons is not None and index < len(polygons):
             pts = np.asarray(polygons[index], dtype=np.int32)
             if pts.ndim == 2 and len(pts) >= 3:
-                cv2.fillPoly(overlay, [pts], color)
-                drew_mask = True
+                if draw and overlay is not None:
+                    cv2.fillPoly(overlay, [pts], color)
+                    drew_mask = True
                 polygons_by_class.setdefault(name, []).append(pts)
         anchor = _label_anchor(boxes, corners, index)
         pending.append((class_id, confidence, name, color, anchor))
         items.append({"class": name, "confidence": round(confidence, 3)})
-    if drew_mask:
+    if draw and drew_mask and overlay is not None:
         annotated = cv2.addWeighted(overlay, 0.45, annotated, 0.55, 0)
-    for index, (_class_id, confidence, name, color, anchor) in enumerate(pending):
-        if corners is not None and index < len(corners):
-            pts = np.asarray(corners[index], dtype=np.int32).reshape(-1, 2)
-            cv2.polylines(annotated, [pts], True, color, 2)
-        elif boxes is not None and index < len(boxes):
-            x1, y1, x2, y2 = (int(round(float(v))) for v in boxes[index][:4])
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
-        if keypoints is not None and index < len(keypoints):
-            for point in np.asarray(keypoints[index]).reshape(-1, 2):
-                x_pos, y_pos = int(round(float(point[0]))), int(round(float(point[1])))
-                if x_pos > 0 or y_pos > 0:
-                    cv2.circle(annotated, (x_pos, y_pos), 3, color, -1)
-        x_pos, y_pos = anchor
-        cv2.putText(
-            annotated,
-            f"{name} {confidence:.0%}",
-            (x_pos, max(20, y_pos - 6)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            color,
-            2,
-            cv2.LINE_AA,
-        )
+    if draw:
+        for index, (_class_id, confidence, name, color, anchor) in enumerate(pending):
+            if corners is not None and index < len(corners):
+                pts = np.asarray(corners[index], dtype=np.int32).reshape(-1, 2)
+                cv2.polylines(annotated, [pts], True, color, 2)
+            elif boxes is not None and index < len(boxes):
+                x1, y1, x2, y2 = (int(round(float(v))) for v in boxes[index][:4])
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+            if keypoints is not None and index < len(keypoints):
+                for point in np.asarray(keypoints[index]).reshape(-1, 2):
+                    x_pos, y_pos = int(round(float(point[0]))), int(round(float(point[1])))
+                    if x_pos > 0 or y_pos > 0:
+                        cv2.circle(annotated, (x_pos, y_pos), 3, color, -1)
+            x_pos, y_pos = anchor
+            cv2.putText(
+                annotated,
+                f"{name} {confidence:.0%}",
+                (x_pos, max(20, y_pos - 6)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                color,
+                2,
+                cv2.LINE_AA,
+            )
     items.sort(key=lambda item: item["confidence"], reverse=True)
     class_areas = _union_polygon_areas(frame.shape[:2], polygons_by_class)
     return annotated, items, class_areas
@@ -222,12 +226,22 @@ def _union_polygon_areas(
     if not polygons_by_class:
         return {}
     height, width = shape
-    scratch = np.zeros((height, width), dtype=np.uint8)
+    # Prefer a compact scratch canvas when polygons only cover a region of the frame.
     areas: dict[str, int] = {}
     for name, polys in polygons_by_class.items():
-        scratch.fill(0)
-        for pts in polys:
-            cv2.fillPoly(scratch, [pts], 1)
+        if not polys:
+            areas[name] = 0
+            continue
+        min_x = max(0, int(min(int(pts[:, 0].min()) for pts in polys)) - 1)
+        min_y = max(0, int(min(int(pts[:, 1].min()) for pts in polys)) - 1)
+        max_x = min(width, int(max(int(pts[:, 0].max()) for pts in polys)) + 2)
+        max_y = min(height, int(max(int(pts[:, 1].max()) for pts in polys)) + 2)
+        if max_x <= min_x or max_y <= min_y:
+            areas[name] = 0
+            continue
+        scratch = np.zeros((max_y - min_y, max_x - min_x), dtype=np.uint8)
+        shifted = [pts - np.array([[min_x, min_y]], dtype=pts.dtype) for pts in polys]
+        cv2.fillPoly(scratch, shifted, 1)
         areas[name] = int(scratch.sum())
     return areas
 

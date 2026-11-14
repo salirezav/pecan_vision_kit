@@ -31,9 +31,12 @@ def worker_main(request_q: Any, response_q: Any) -> None:
             continue
         try:
             recording = bool(job.get("recording"))
+            import os  # noqa: PLC0415
             import torch  # noqa: PLC0415
 
-            torch.set_num_threads(2 if recording else 3)
+            cores = max(1, os.cpu_count() or 1)
+            # Leave headroom for the camera grab thread while recording.
+            torch.set_num_threads(2 if recording else min(4, cores))
             weights = Path(str(job["weights_path"]))
             meta = dict(job.get("meta") or {})
             mtime = weights.stat().st_mtime
@@ -61,6 +64,7 @@ def worker_main(request_q: Any, response_q: Any) -> None:
                 meta,
                 float(job.get("threshold", 0.5)),
                 speed=str(job.get("speed") or "fast"),
+                draw=bool(job.get("draw", True)),
             )
             response_q.put(result)
         except Exception as exc:  # noqa: BLE001
@@ -124,6 +128,7 @@ class InferClient:
         threshold: float,
         speed: str,
         recording: bool,
+        draw: bool = True,
     ) -> dict[str, Any]:
         from segment_inspect import ModelBusy  # noqa: PLC0415
 
@@ -144,6 +149,7 @@ class InferClient:
                         "threshold": threshold,
                         "speed": speed,
                         "recording": recording,
+                        "draw": bool(draw),
                     }
                 )
             except Exception:

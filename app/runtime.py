@@ -14,6 +14,7 @@ import yaml
 from camera import FPS_CHOICES, RESOLUTIONS, CameraService, find_camera_device
 from deploy_live import DeployLiveService
 from segment import ModelBusy, ModelService
+from segment_inspect import infer_frame_max_side
 from storage import ensure_allowed_dir, list_videos
 from update import read_version, version_label
 
@@ -30,10 +31,18 @@ models = ModelService(
     ROOT,
     recording_check=lambda: bool(cam and cam.status().get("recording")),
 )
+
+
+def capture_infer_jpeg(speed: str = "fast") -> bytes | None:
+    meta = models.infer_meta()
+    max_side = infer_frame_max_side(meta, speed)
+    return require_cam().get_infer_jpeg(max_side=max_side)
+
+
 deploy_live = DeployLiveService(
-    get_jpeg=lambda: require_cam().get_jpeg(quality=90),
-    predict=lambda jpeg, threshold, speed: models.predict_jpeg(
-        jpeg, threshold, speed=speed
+    get_jpeg=capture_infer_jpeg,
+    predict=lambda jpeg, threshold, speed, draw=False: models.predict_jpeg(
+        jpeg, threshold, speed=speed, draw=draw
     ),
     list_metrics=lambda: models.list_metrics(),
     model_busy=ModelBusy,

@@ -14,8 +14,8 @@ class DeployLiveService:
     def __init__(
         self,
         *,
-        get_jpeg: Callable[[], bytes | None],
-        predict: Callable[[bytes, float, str], dict[str, Any]],
+        get_jpeg: Callable[[str], bytes | None],
+        predict: Callable[..., dict[str, Any]],
         list_metrics: Callable[[], list[dict[str, Any]]],
         model_busy: type[Exception],
     ) -> None:
@@ -106,14 +106,14 @@ class DeployLiveService:
                 threshold = self._threshold
                 speed = self._speed
             try:
-                jpeg = self._get_jpeg()
+                jpeg = self._get_jpeg(speed)
                 if jpeg is None:
                     time.sleep(0.2)
                     continue
                 try:
-                    result = self._predict(jpeg, threshold, speed)
+                    result = self._predict(jpeg, threshold, speed, draw=False)
                 except self._model_busy:
-                    time.sleep(0.4)
+                    time.sleep(0.05)
                     continue
                 if not result.get("ok"):
                     with self._lock:
@@ -128,14 +128,18 @@ class DeployLiveService:
                         self._last_error = str(exc)
                         # Keep running; a transient error should not kill Deploy.
                 time.sleep(1.0)
-            time.sleep(0.4)
+                continue
+            # Success path: loop immediately so FPS tracks model time.
+            time.sleep(0)
 
     def _ingest(self, result: dict[str, Any], generation: int) -> None:
         measurements = result.get("measurements") or []
         with self._lock:
             if not self._running or generation != self._generation:
                 return
-            self._last_image = result.get("image")
+            image = result.get("image")
+            if image:
+                self._last_image = image
             self._last_elapsed_ms = int(result.get("elapsed_ms") or 0)
             self._last_error = None
             frame_map: dict[str, dict[str, float]] = {}

@@ -145,6 +145,8 @@ _KIND = {
     ("ultralytics", "semantic"): "YOLO semantic segmentation",
     ("ultralytics", "depth"): "YOLO depth",
     ("rfdetr", "segment"): "RF-DETR segmentation",
+    ("hailo", "detect"): "Hailo YOLO detection",
+    ("hailo", "segment"): "Hailo YOLO segmentation",
 }
 _STUB_CLASSES: dict[str, type] = {}
 
@@ -210,7 +212,7 @@ class _CheckpointUnpickler(pickle.Unpickler):
 
 def _checkpoint_object(path: Path) -> dict[str, Any]:
     if not zipfile.is_zipfile(path):
-        raise ValueError("Upload a .pt or .pth weights file.")
+        raise ValueError("Upload a .pt, .pth, or .hef weights file.")
     with zipfile.ZipFile(path) as archive:
         pickles = [name for name in archive.namelist() if name.endswith("/data.pkl") or name == "data.pkl"]
         if not pickles:
@@ -324,6 +326,10 @@ def _tensor_size(model: dict[str, Any], key: str) -> tuple[int, ...] | None:
 
 
 def inspect_checkpoint(path: Path) -> dict[str, Any]:
+    if Path(path).suffix.lower() == ".hef":
+        from hailo_runtime import inspect_hef  # noqa: PLC0415
+
+        return inspect_hef(Path(path))
     obj = _checkpoint_object(path)
     if not isinstance(obj, dict):
         if _origin_of(obj):
@@ -535,10 +541,31 @@ SPEED_SIZES = {
 }
 
 
+def infer_frame_max_side(meta: dict[str, Any] | None, speed: str = "fast") -> int:
+    """Longest side to keep when downscaling a camera frame for inference IPC."""
+    info = meta if isinstance(meta, dict) else {}
+    speed_key = speed if speed in SPEED_SIZES else "fast"
+    family = str(info.get("family") or "rfdetr")
+    if family in {"ultralytics", "hailo"}:
+        native = int(info.get("resolution") or 640)
+        return yolo_infer_size(native, speed_key)
+    size = SPEED_SIZES.get(speed_key)
+    if size is None:
+        return int(info.get("resolution") or 640)
+    return int(size)
+
+
 def library_error(family: str | None = None) -> str | None:
     """Report missing model packages without importing torch into the web process."""
     import importlib.util
+    from pathlib import Path as _Path
 
+    if family == "hailo":
+        if importlib.util.find_spec("hailo_platform") is None:
+            return "This is a Hailo HEF model, and hailo_platform is not installed."
+        if not _Path("/dev/hailo0").exists():
+            return "Hailo-8 device /dev/hailo0 was not found on this kit."
+        return None
     if importlib.util.find_spec("torch") is None:
         return "The model library is not ready yet (torch is not installed)."
     if family == "ultralytics":

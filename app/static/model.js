@@ -499,7 +499,7 @@
   formEl.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!fileEl.files || !fileEl.files[0]) {
-      setMsg("Choose a .pt or .pth weights file first.", "err");
+      setMsg("Choose a .pt, .pth, or .hef weights file first.", "err");
       return;
     }
     const body = new FormData();
@@ -570,7 +570,8 @@
     while (live) {
       if (!busy) await runOnce(true);
       if (!live) break;
-      await new Promise((resolve) => setTimeout(resolve, 400));
+      // Yield to the event loop only — FPS should track model time.
+      await new Promise((resolve) => setTimeout(resolve, 0));
     }
   });
 

@@ -1,0 +1,101 @@
+{
+  "device": "Hailo-8",
+  "results": [
+    {
+      "hef": "yolov8s_h8.hef",
+      "network": "yolov8s",
+      "input": [
+        640,
+        640,
+        3
+      ],
+      "outputs": [
+        [
+          "yolov8s/yolov8_nms_postprocess",
+          [
+            80,
+            5,
+            100
+          ]
+        ]
+      ],
+      "warmup": 10,
+      "iters": 50,
+      "elapsed_s": 0.6593,
+      "fps": 75.84,
+      "ms_per_frame": 13.19
+    },
+    {
+      "hef": "yolov6n_h8.hef",
+      "network": "yolov6n",
+      "input": [
+        640,
+        640,
+        3
+      ],
+      "outputs": [
+        [
+          "yolov6n/yolox_nms_postprocess",
+          [
+            80,
+            5,
+            100
+          ]
+        ]
+      ],
+      "warmup": 10,
+      "iters": 50,
+      "elapsed_s": 0.3821,
+      "fps": 130.85,
+      "ms_per_frame": 7.64
+    },
+    {
+      "hef": "yolov5n_seg_h8.hef",
+      "network": "yolov5n_seg",
+      "input": [
+        640,
+        640,
+        3
+      ],
+      "outputs": [
+        [
+          "yolov5n_seg/conv63",
+          [
+            160,
+            160,
+            32
+          ]
+        ],
+        [
+          "yolov5n_seg/conv61",
+          [
+            20,
+            20,
+            351
+          ]
+        ],
+        [
+          "yolov5n_seg/conv55",
+          [
+            40,
+            40,
+            351
+          ]
+        ],
+        [
+          "yolov5n_seg/conv48",
+          [
+            80,
+            80,
+            351
+          ]
+        ]
+      ],
+      "warmup": 10,
+      "iters": 50,
+      "elapsed_s": 1.394,
+      "fps": 35.87,
+      "ms_per_frame": 27.88
+    }
+  ]
+}

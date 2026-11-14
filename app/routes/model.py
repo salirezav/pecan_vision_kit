@@ -66,11 +66,16 @@ def api_model_run():
     except (TypeError, ValueError):
         threshold = 0.5
     speed = str(data.get("speed") or "fast")
+    draw = data.get("draw", True)
+    if isinstance(draw, str):
+        draw = draw.strip().lower() not in {"0", "false", "no"}
     try:
-        jpeg = rt.require_cam().get_jpeg(quality=90)
+        jpeg = rt.capture_infer_jpeg(speed)
         if jpeg is None:
             return jsonify({"ok": False, "error": "The camera does not have a frame yet."}), 503
-        return jsonify(rt.models.predict_jpeg(jpeg, threshold, speed=speed))
+        return jsonify(
+            rt.models.predict_jpeg(jpeg, threshold, speed=speed, draw=bool(draw))
+        )
     except ModelBusy as exc:
         return jsonify({"ok": False, "error": str(exc)}), 409
     except Exception as exc:  # noqa: BLE001

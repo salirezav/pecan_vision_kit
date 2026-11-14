@@ -62,6 +62,23 @@ class ModelService:
         self._infer.stop()
 
     def weights_path(self) -> Path:
+        meta = {}
+        path = self.meta_path()
+        if path.is_file():
+            try:
+                raw = json.loads(path.read_text())
+                if isinstance(raw, dict):
+                    meta = raw
+            except (OSError, json.JSONDecodeError):
+                meta = {}
+        stored = str(meta.get("weights_file") or "").strip()
+        if stored:
+            candidate = self.store_dir / stored
+            if candidate.is_file():
+                return candidate
+        hef = self.store_dir / "current.hef"
+        if hef.is_file():
+            return hef
         return self.store_dir / "current.pt"
 
     def meta_path(self) -> Path:
@@ -98,6 +115,7 @@ class ModelService:
     def _write_meta(self, weights: Path, filename: str, class_names: list[str]) -> dict[str, Any]:
         info = _finish_names(inspect_checkpoint(weights), class_names)
         info["filename"] = filename
+        info["weights_file"] = weights.name
         self.meta_path().write_text(json.dumps(info, indent=2))
         return info
 
@@ -149,18 +167,26 @@ class ModelService:
         if len(payload) > MAX_UPLOAD_BYTES:
             raise ValueError("That file is too large (limit 800 MB).")
         suffix = Path(filename).suffix.lower()
-        if suffix not in {".pt", ".pth"}:
-            raise ValueError("Upload a .pt or .pth weights file.")
+        if suffix not in {".pt", ".pth", ".hef"}:
+            raise ValueError("Upload a .pt, .pth, or .hef weights file.")
         self.store_dir.mkdir(parents=True, exist_ok=True)
-        temp = self.store_dir / "upload.pt"
+        temp = self.store_dir / f"upload{suffix}"
         temp.write_bytes(payload)
         try:
-            inspect_checkpoint(temp)
-            dest = self.weights_path()
+            info = inspect_checkpoint(temp)
+            dest_name = "current.hef" if suffix == ".hef" else "current.pt"
+            dest = self.store_dir / dest_name
+            for stale in (self.store_dir / "current.pt", self.store_dir / "current.hef"):
+                if stale.exists() or stale.is_symlink():
+                    if stale != dest:
+                        stale.unlink()
             if dest.exists() or dest.is_symlink():
                 dest.unlink()
             temp.replace(dest)
-            self._write_meta(dest, Path(filename).name, split_names(class_names_raw))
+            meta = _finish_names(info, split_names(class_names_raw))
+            meta["filename"] = Path(filename).name
+            meta["weights_file"] = dest_name
+            self.meta_path().write_text(json.dumps(meta, indent=2))
         except Exception:
             if temp.exists():
                 temp.unlink()
@@ -250,6 +276,8 @@ class ModelService:
         jpeg: bytes,
         threshold: float,
         speed: str = "fast",
+        *,
+        draw: bool = True,
     ) -> dict[str, Any]:
         if jpeg is None:
             raise RuntimeError("The camera does not have a frame yet.")
@@ -273,6 +301,7 @@ class ModelService:
                 threshold=threshold,
                 speed=speed,
                 recording=recording,
+                draw=draw,
             )
         finally:
             self._loading = False
@@ -283,3 +312,7 @@ class ModelService:
         self._loaded = True
         self._error = None
         return result
+
+    def infer_meta(self) -> dict[str, Any]:
+        self.ensure_seeded()
+        return self._read_meta()

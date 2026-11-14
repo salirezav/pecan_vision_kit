@@ -73,6 +73,10 @@ def apply_labels(model: Any, labels: list[str]) -> None:
 
 def _load_model(path: Path, meta: dict[str, Any]) -> Any:
     family = str(meta.get("family") or inspect_checkpoint(path).get("family") or "rfdetr")
+    if family == "hailo":
+        from hailo_runtime import load_hailo  # noqa: PLC0415
+
+        return load_hailo(path, meta)
     if family == "ultralytics":
         return _load_ultralytics(path, meta)
     return _load_rfdetr(path, meta)
@@ -144,12 +148,15 @@ def _run_ultralytics(
     labels: list[str],
     infer_size: int,
     task: str,
+    *,
+    draw: bool = True,
 ) -> tuple[np.ndarray, list[dict[str, Any]], dict[str, int]]:
     kwargs: dict[str, Any] = {
         "imgsz": int(infer_size),
         "device": "cpu",
         "verbose": False,
         "stream": False,
+        "retina_masks": False,
     }
     if task not in {"depth", "semantic"}:
         kwargs["conf"] = float(threshold)
@@ -166,14 +173,14 @@ def _run_ultralytics(
     if task == "semantic":
         semantic = getattr(result, "semantic_mask", None)
         if semantic is None or getattr(semantic, "data", None) is None:
-            return bgr.copy(), [], {}
+            return (bgr.copy() if draw else bgr), [], {}
         return _draw_semantic(bgr, _as_numpy(semantic.data), labels)
     if task == "depth":
         depth = getattr(result, "depth", None)
         if depth is None or getattr(depth, "data", None) is None:
-            return bgr.copy(), [], {}
+            return (bgr.copy() if draw else bgr), [], {}
         return _colorize_depth(bgr, _as_numpy(depth.data)), [], {}
-    return _draw_ultralytics_instances(result, bgr, labels, task)
+    return _draw_ultralytics_instances(result, bgr, labels, task, draw=draw)
 
 
 def _run_model(
@@ -182,6 +189,8 @@ def _run_model(
     threshold: float,
     labels: list[str],
     infer_size: int | None = None,
+    *,
+    draw: bool = True,
 ) -> tuple[np.ndarray, list[dict[str, Any]], dict[str, int]]:
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
     predict_kwargs: dict[str, Any] = {
@@ -193,7 +202,7 @@ def _run_model(
     detections = model.predict(rgb, **predict_kwargs)
     if isinstance(detections, list):
         detections = detections[0] if detections else None
-    annotated = bgr.copy()
+    annotated = bgr.copy() if draw else bgr
     items: list[dict[str, Any]] = []
     if detections is None or getattr(detections, "xyxy", None) is None or len(detections) == 0:
         return annotated, items, {}
@@ -204,7 +213,7 @@ def _run_model(
     masks = getattr(detections, "mask", None)
     keep = list(range(len(class_ids)))
 
-    overlay = annotated.copy()
+    overlay = annotated.copy() if draw else None
     drew_mask = False
     union_masks: dict[str, np.ndarray] = {}
     if masks is not None:
@@ -213,24 +222,25 @@ def _run_model(
             if index >= len(mask_list):
                 continue
             class_id = int(class_ids[index])
-            color = _COLORS[class_id % len(_COLORS)]
             region = np.asarray(mask_list[index])
             if region.ndim == 3:
                 region = region[0]
-            if region.shape[:2] != annotated.shape[:2]:
+            if region.shape[:2] != bgr.shape[:2]:
                 region = cv2.resize(
                     region.astype(np.uint8),
-                    (annotated.shape[1], annotated.shape[0]),
+                    (bgr.shape[1], bgr.shape[0]),
                     interpolation=cv2.INTER_NEAREST,
                 )
             region_bool = region.astype(bool)
-            overlay[region_bool] = color
-            drew_mask = True
             name = labels[class_id] if 0 <= class_id < len(labels) else f"Class {class_id + 1}"
             if name not in union_masks:
-                union_masks[name] = np.zeros(annotated.shape[:2], dtype=bool)
+                union_masks[name] = np.zeros(bgr.shape[:2], dtype=bool)
             union_masks[name] |= region_bool
-    if drew_mask:
+            if draw and overlay is not None:
+                color = _COLORS[class_id % len(_COLORS)]
+                overlay[region_bool] = color
+                drew_mask = True
+    if draw and drew_mask and overlay is not None:
         annotated = cv2.addWeighted(overlay, 0.45, annotated, 0.55, 0)
 
     for index in keep:
@@ -240,20 +250,21 @@ def _run_model(
             name = labels[class_id]
         else:
             name = f"Class {class_id + 1}"
-        color = _COLORS[class_id % len(_COLORS)]
-        x1, y1, x2, y2 = (int(round(v)) for v in boxes[index][:4])
-        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
-        caption = f"{name} {confidence:.0%}"
-        cv2.putText(
-            annotated,
-            caption,
-            (x1, max(20, y1 - 6)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            color,
-            2,
-            cv2.LINE_AA,
-        )
+        if draw:
+            color = _COLORS[class_id % len(_COLORS)]
+            x1, y1, x2, y2 = (int(round(v)) for v in boxes[index][:4])
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+            caption = f"{name} {confidence:.0%}"
+            cv2.putText(
+                annotated,
+                caption,
+                (x1, max(20, y1 - 6)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                color,
+                2,
+                cv2.LINE_AA,
+            )
         items.append({"class": name, "confidence": round(confidence, 3)})
     items.sort(key=lambda item: item["confidence"], reverse=True)
     class_areas = {name: int(mask.sum()) for name, mask in union_masks.items()}
@@ -265,6 +276,8 @@ def predict_frame(
     meta: dict[str, Any],
     threshold: float,
     speed: str = "fast",
+    *,
+    draw: bool = True,
 ) -> dict[str, Any]:
     frame = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_COLOR)
     if frame is None:
@@ -274,16 +287,29 @@ def predict_frame(
     started = time.perf_counter()
     family = str(meta.get("family") or "rfdetr")
     task = str(meta.get("task") or "segment")
-    labels = parse_class_names(
-        ",".join(str(name) for name in (meta.get("class_names") or [])),
-        int(meta.get("num_classes") or 0),
-        family,
-    )
-    apply_labels(model, labels)
-    if family == "ultralytics":
+    cached = getattr(model, "_pecan_labels", None)
+    labels = list(cached) if isinstance(cached, (list, tuple)) else None
+    if labels is None:
+        labels = parse_class_names(
+            ",".join(str(name) for name in (meta.get("class_names") or [])),
+            int(meta.get("num_classes") or 0),
+            family,
+        )
+        apply_labels(model, labels)
+        try:
+            setattr(model, "_pecan_labels", list(labels))
+        except Exception:  # noqa: BLE001
+            pass
+    if family == "hailo":
+        from hailo_runtime import run_hailo  # noqa: PLC0415
+
+        annotated, items, class_areas = run_hailo(
+            model, frame, threshold, labels, task, draw=draw
+        )
+    elif family == "ultralytics":
         infer_size = yolo_infer_size(int(meta.get("resolution") or 640), speed_key)
         annotated, items, class_areas = _run_ultralytics(
-            model, frame, threshold, labels, infer_size, task
+            model, frame, threshold, labels, infer_size, task, draw=draw
         )
     else:
         annotated, items, class_areas = _run_model(
@@ -292,10 +318,14 @@ def predict_frame(
             threshold,
             labels,
             infer_size=SPEED_SIZES[speed_key],
+            draw=draw,
         )
-    ok, buf = cv2.imencode(".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
-    if not ok:
-        raise RuntimeError("Could not encode the result image.")
+    image = None
+    if draw:
+        ok, buf = cv2.imencode(".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+        if not ok:
+            raise RuntimeError("Could not encode the result image.")
+        image = "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode("ascii")
     result_mode = (_TASKS.get(task) or _TASKS["segment"])["result_mode"]
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     best = items[0] if items else None
@@ -319,7 +349,7 @@ def predict_frame(
         "best": best,
         "match": match if result_mode == "scores" else None,
         "total": len(items) if result_mode == "counts" else (1 if match else 0),
-        "image": "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode("ascii"),
+        "image": image,
     }
 
 

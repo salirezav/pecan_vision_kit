@@ -209,6 +209,31 @@ class CameraService:
             return None
         return buf.tobytes()
 
+    def get_infer_jpeg(self, max_side: int = 320, quality: int = 85) -> bytes | None:
+        """Latest frame resized so the longest side is at most max_side, then JPEG-encoded.
+
+        Avoids shipping full-res frames through the inference worker when the model
+        only needs ~288–480 px input.
+        """
+        with self._lock:
+            frame = None if self._frame is None else self._frame.copy()
+        if frame is None:
+            return None
+        height, width = frame.shape[:2]
+        longest = max(height, width)
+        side = max(32, int(max_side or 320))
+        if longest > side:
+            scale = side / float(longest)
+            frame = cv2.resize(
+                frame,
+                (max(1, int(round(width * scale))), max(1, int(round(height * scale)))),
+                interpolation=cv2.INTER_AREA,
+            )
+        ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)])
+        if not ok:
+            return None
+        return buf.tobytes()
+
     def start_recording(self) -> str:
         with self._lock:
             if self._recording:
