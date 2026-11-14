@@ -1,6 +1,10 @@
+# Direct dependencies for the kit. Install with uv from the repo root
+# (`uv sync`), not with pip. pip would select the CUDA PyTorch build and
+# download cuDNN. The locked set lives in ../uv.lock and ../pyproject.toml.
 flask>=3.0,<4
 opencv-python-headless>=4.8
 PyYAML>=6.0
 rfdetr>=1.11.2
-# YOLO checkpoints. Ultralytics is AGPL-3.0; release updates install it from this file.
+torch==2.14.1+cpu
+torchvision==0.29.1+cpu
 ultralytics>=8.4.23,<8.5

@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # Interactive installer / updater for Pecan Vision Kit (Raspberry Pi 5).
 # Copy the whole pecan-vision-kit folder to each Pi, then run this script.
+# This check is POSIX so `sh setup-kit.sh` fails here instead of midway.
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "This script needs bash. Do not run it with sh or sudo sh." >&2
+  echo "From the project folder, as the kit user (not root):" >&2
+  echo "  ./scripts/setup-kit.sh" >&2
+  exit 1
+fi
 set -euo pipefail
 
 KIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -79,29 +86,58 @@ install_packages() {
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
     python3-venv python3-pip python3-opencv python3-yaml \
     v4l-utils ffmpeg \
-    network-manager
+    network-manager \
+    curl ca-certificates
   ok "Packages installed"
+}
+
+ensure_uv() {
+  if command -v uv >/dev/null 2>&1; then
+    return
+  fi
+  local user_uv="$HOME_DIR/.local/bin/uv"
+  if [[ -x "$user_uv" ]]; then
+    export PATH="$HOME_DIR/.local/bin:$PATH"
+    return
+  fi
+  info "Installing uv…"
+  curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$HOME_DIR/.local/bin" sh
+  export PATH="$HOME_DIR/.local/bin:$PATH"
 }
 
 setup_venv() {
   info "Creating Python virtualenv (with system site-packages for OpenCV)…"
+  ensure_uv
   if [[ ! -d "$VENV" ]]; then
-    python3 -m venv --system-site-packages "$VENV"
+    uv venv --python python3 --system-site-packages "$VENV"
   fi
-  # shellcheck disable=SC1091
-  source "$VENV/bin/activate"
-  pip install --upgrade pip wheel
-  pip install -r "$KIT_ROOT/app/requirements.txt"
-  # ultralytics asks for opencv-python. The camera uses the headless build.
-  if pip show opencv-python >/dev/null 2>&1; then
-    pip uninstall -y opencv-python
-    pip install --force-reinstall --no-deps "opencv-python-headless>=4.8"
-  fi
+  # --inexact keeps apt packages visible through system-site-packages.
+  # CPU torch is selected by pyproject.toml; cuDNN and the CUDA stack are excluded.
+  uv sync --directory "$KIT_ROOT" --frozen --inexact --no-install-project
   ok "Virtualenv ready: $VENV"
 }
 
 prepare_nvme() {
   info "Checking storage at $NVME_DEV…"
+  local root_src boot_src
+  root_src="$(findmnt -no SOURCE / 2>/dev/null || true)"
+  boot_src="$(findmnt -no SOURCE /boot/firmware 2>/dev/null || true)"
+  # The kit image sometimes uses the NVMe as the OS disk (p1 boot, p2 root).
+  # Partition 1 is then the firmware volume, not a recordings disk.
+  if [[ "$root_src" == "$NVME_DEV"* || "$boot_src" == "$NVME_DEV"* ]]; then
+    warn "$NVME_DEV is the system disk (root: ${root_src:-unknown}). Not partitioning it."
+    warn "Recordings will stay in $MOUNT_POINT on the root filesystem."
+    if awk '{print $2}' /etc/fstab | grep -qx "$MOUNT_POINT"; then
+      sudo sed -i "\\|[[:space:]]${MOUNT_POINT}[[:space:]]|d" /etc/fstab
+      sudo systemctl daemon-reload
+      ok "Removed $MOUNT_POINT from /etc/fstab (it pointed at the system disk)"
+    fi
+    sudo mkdir -p "$MOUNT_POINT/videos"
+    sudo chown -R "$USER_NAME:$USER_NAME" "$MOUNT_POINT"
+    df -h "$MOUNT_POINT" || true
+    ok "Recordings directory ready"
+    return
+  fi
   if [[ ! -b "$NVME_DEV" ]]; then
     warn "No NVMe found at $NVME_DEV — skipping disk setup."
     sudo mkdir -p "$MOUNT_POINT/videos"
@@ -177,6 +213,7 @@ install_service() {
   local tmp
   tmp="$(mktemp)"
   sed \
+    -e "s|/home/engr-ugaif/pecan-vision-kit|$KIT_ROOT|g" \
     -e "s|/home/engr-ugaif|$HOME_DIR|g" \
     -e "s|User=engr-ugaif|User=$USER_NAME|g" \
     -e "s|Group=engr-ugaif|Group=$USER_NAME|g" \
@@ -202,9 +239,12 @@ install_service() {
   sudo systemctl daemon-reload
   sudo systemctl enable pecan-vision.service
   if ask_yn "Start / restart pecan-vision service now?" "y"; then
-    sudo systemctl restart pecan-vision.service
-    sleep 1
-    systemctl --no-pager --full status pecan-vision.service || true
+    if ! sudo systemctl restart pecan-vision.service; then
+      err "pecan-vision did not start. Check: journalctl -u pecan-vision -u mnt-recordings.mount"
+    else
+      sleep 1
+      systemctl --no-pager --full status pecan-vision.service || true
+    fi
   fi
   ok "Service installed"
 }
