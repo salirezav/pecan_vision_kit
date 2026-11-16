@@ -325,7 +325,9 @@ def run_hailo(
     *,
     draw: bool = True,
     reference_side: int | None = None,
+    class_thresholds: dict[str, float] | None = None,
 ) -> tuple[np.ndarray, list[dict[str, Any]], dict[str, int], list[dict[str, Any]]]:
+    del task
     letterboxed, scale, pad_x, pad_y = _letterbox(bgr, model.input_w, model.input_h)
     rgb = cv2.cvtColor(letterboxed, cv2.COLOR_BGR2RGB)
     outputs = model.infer(rgb)
@@ -348,9 +350,6 @@ def run_hailo(
             model.input_w,
             model.input_h,
         )
-        for class_id, x1, y1, x2, y2, _score in boxes:
-            name = labels[class_id] if 0 <= class_id < len(labels) else f"Class {class_id + 1}"
-            class_areas[name] = class_areas.get(name, 0) + max(0, (x2 - x1) * (y2 - y1))
     elif model.postprocess == "yolov5_seg":
         items, boxes, class_areas = _decode_yolov5_seg(
             outputs,
@@ -368,6 +367,32 @@ def run_hailo(
             "This HEF output layout is not supported yet. "
             "Use a YOLO HEF with on-chip NMS (detect) or yolov5-seg raw heads."
         )
+
+    if class_thresholds:
+        filtered_boxes: list[tuple[int, int, int, int, int, float]] = []
+        for class_id, x1, y1, x2, y2, score in boxes:
+            name = labels[class_id] if 0 <= class_id < len(labels) else f"Class {class_id + 1}"
+            cutoff = float(class_thresholds.get(name, threshold))
+            if float(score) < cutoff:
+                continue
+            filtered_boxes.append((class_id, x1, y1, x2, y2, score))
+        boxes = filtered_boxes
+        items = [
+            {
+                "class": (
+                    labels[class_id] if 0 <= class_id < len(labels) else f"Class {class_id + 1}"
+                ),
+                "confidence": round(float(score), 3),
+            }
+            for class_id, _x1, _y1, _x2, _y2, score in boxes
+        ]
+        items.sort(key=lambda item: item["confidence"], reverse=True)
+
+    if model.postprocess == "nms" or class_thresholds:
+        class_areas = {}
+        for class_id, x1, y1, x2, y2, _score in boxes:
+            name = labels[class_id] if 0 <= class_id < len(labels) else f"Class {class_id + 1}"
+            class_areas[name] = class_areas.get(name, 0) + max(0, (x2 - x1) * (y2 - y1))
 
     instances: list[dict[str, Any]] = []
     for class_id, x1, y1, x2, y2, score in boxes:

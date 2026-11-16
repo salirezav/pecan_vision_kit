@@ -13,7 +13,6 @@ import yaml
 
 from camera import FPS_CHOICES, RESOLUTIONS, CameraService, find_camera_device
 from deploy_live import DeployLiveService
-from review_live import ReviewLiveService
 from segment import ModelBusy, ModelService
 from segment_inspect import display_frame_max_side
 from storage import ensure_allowed_dir, list_videos
@@ -59,41 +58,20 @@ def camera_frame_size() -> tuple[int | None, int | None]:
 
 deploy_live = DeployLiveService(
     get_jpeg=capture_infer_jpeg,
-    predict=lambda jpeg, threshold, speed, draw=True, roi=None, roi_space=None: models.predict_jpeg(
-        jpeg, threshold, speed=speed, draw=draw, roi=roi, roi_space=roi_space
+    predict=lambda jpeg, threshold, speed, draw=True, roi=None, roi_space=None, calibration=None: models.predict_jpeg(
+        jpeg,
+        threshold,
+        speed=speed,
+        draw=draw,
+        roi=roi,
+        roi_space=roi_space,
+        calibration=calibration,
     ),
     list_metrics=lambda: models.list_metrics(),
     model_busy=ModelBusy,
     model_status=lambda: models.status(),
     get_frame_size=camera_frame_size,
-)
-
-
-def _review_video_rows() -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for row in list_videos(current_save_dir(), limit=100):
-        if not isinstance(row, dict):
-            continue
-        name = str(row.get("name") or "")
-        path = current_save_dir() / name
-        if not path.is_file():
-            continue
-        rows.append(
-            {
-                "name": name,
-                "path": str(path),
-                "size_mb": row.get("size_mb"),
-                "mtime": row.get("mtime"),
-            }
-        )
-    return rows
-
-
-review_live = ReviewLiveService(
-    predict_roi=lambda jpeg, **kwargs: models.predict_roi_jpeg(jpeg, **kwargs),
-    halfyield_status=lambda: models.halfyield_status(),
-    model_busy=ModelBusy,
-    list_videos=_review_video_rows,
+    get_calibration=lambda: models.get_calibration(),
 )
 
 

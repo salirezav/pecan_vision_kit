@@ -12,6 +12,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+import calibration_store
 from infer_worker import InferClient
 from metric_formula import formula_labels, normalize_metric, validate_formula
 from segment_inspect import (
@@ -27,6 +28,7 @@ from segment_inspect import (
     parse_class_names,
     split_names,
 )
+from yield_measure import Calibration, area_share, is_halfyield_classes
 
 MAX_METRICS = 8
 _WEIGHT_SUFFIXES = frozenset({".pt", ".pth", ".hef"})
@@ -97,6 +99,9 @@ class ModelService:
     def metrics_path(self) -> Path:
         return self.store_dir / "metrics.json"
 
+    def calibration_path(self) -> Path:
+        return calibration_store.calibration_path()
+
     def active_path(self) -> Path:
         return self.library_dir() / "active.json"
 
@@ -141,6 +146,7 @@ class ModelService:
 
     def ensure_seeded(self) -> None:
         self._adopt_legacy()
+        self._ensure_halfyield_library()
         self._ensure_sidecars()
         files = self._weight_files()
         if files:
@@ -220,6 +226,36 @@ class ModelService:
                 self._store_inspect_failure(dest, bundled.name, exc)
         if dest.is_file():
             self._set_active(dest.name)
+
+    def _ensure_halfyield_library(self) -> None:
+        """Copy bundled half-yield weights into the library once if missing."""
+        self.library_dir().mkdir(parents=True, exist_ok=True)
+        existing_names = {path.name.casefold() for path in self._weight_files()}
+        aliases = {
+            "halfyield-model.pt",
+            "half-yield-analysis.pt",
+            "halfyield-analysis.pt",
+        }
+        if existing_names & aliases:
+            return
+        source = self.halfyield_weights_path()
+        if source is None or not source.is_file():
+            return
+        # Prefer the canonical library name.
+        dest_name = "halfyield-model.pt"
+        dest = self.library_dir() / dest_name
+        if dest.exists():
+            return
+        try:
+            shutil.copy2(source, dest)
+        except OSError:
+            return
+        if not self._sidecar(dest.name).is_file():
+            try:
+                self._write_meta(dest, source.name, [])
+            except Exception as exc:  # noqa: BLE001
+                self._store_inspect_failure(dest, source.name, exc)
+        # Do not change the active model.
 
     def _ensure_sidecars(self) -> None:
         for path in self._weight_files():
@@ -312,6 +348,11 @@ class ModelService:
         else:
             lib_error = library_error(family if described else "rfdetr")
         active_id = path.name if installed else None
+        class_names = [str(name) for name in (meta.get("class_names") or [])] if installed else []
+        halfyield = bool(installed and is_halfyield_classes(class_names))
+        calibration = (
+            calibration_store.load(active_id or "", class_names) if installed and active_id else None
+        )
         return {
             "installed": installed,
             "active_id": active_id,
@@ -326,7 +367,7 @@ class ModelService:
             "variant": meta.get("variant") if installed else None,
             "architecture": meta.get("architecture") if installed else None,
             "resolution": meta.get("resolution") if installed else None,
-            "class_names": (meta.get("class_names") or []) if installed else [],
+            "class_names": class_names,
             "names_from_file": bool(meta.get("names_from_file")) if installed else False,
             "inspect_error": meta.get("inspect_error") if installed else None,
             "loaded": self._loaded,
@@ -336,8 +377,30 @@ class ModelService:
             "library_ready": lib_error is None,
             "library_error": lib_error,
             "speeds": list(SPEED_SIZES.keys()),
+            "halfyield": halfyield,
+            "calibration": calibration,
             **view,
         }
+
+    def get_calibration(self) -> dict[str, Any]:
+        self.ensure_seeded()
+        path = self.weights_path()
+        if not path.is_file():
+            raise ValueError("Upload a model first.")
+        meta = self._read_meta()
+        names = [str(name) for name in (meta.get("class_names") or [])]
+        return calibration_store.load(path.name, names)
+
+    def save_calibration(self, raw: Any) -> dict[str, Any]:
+        self.ensure_seeded()
+        path = self.weights_path()
+        if not path.is_file():
+            raise ValueError("Upload a model first.")
+        meta = self._read_meta()
+        names = [str(name) for name in (meta.get("class_names") or [])]
+        if not names:
+            raise ValueError("Save class names on the model before calibrating.")
+        return calibration_store.save(path.name, raw, names)
 
     def install_upload(self, payload: bytes, filename: str, class_names_raw: str) -> dict[str, Any]:
         if self._infer.busy:
@@ -502,12 +565,14 @@ class ModelService:
     def predict_jpeg(
         self,
         jpeg: bytes,
-        threshold: float,
+        threshold: float = 0.5,
         speed: str = "fast",
         *,
         draw: bool = True,
         roi: dict[str, Any] | None = None,
         roi_space: dict[str, Any] | None = None,
+        class_thresholds: dict[str, float] | None = None,
+        calibration: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if jpeg is None:
             raise RuntimeError("The camera does not have a frame yet.")
@@ -516,6 +581,16 @@ class ModelService:
         if not path.is_file():
             raise RuntimeError("Upload a model first.")
         meta = self._read_meta()
+        class_names = [str(name) for name in (meta.get("class_names") or [])]
+        halfyield = is_halfyield_classes(class_names)
+        cal = (
+            calibration_store.normalize_record(calibration, class_names)
+            if calibration is not None
+            else calibration_store.load(path.name, class_names)
+        )
+        thresholds = class_thresholds
+        if thresholds is None:
+            thresholds = calibration_store.class_thresholds(cal, class_names)
         recording = False
         if self._recording_check is not None:
             try:
@@ -524,17 +599,81 @@ class ModelService:
                 recording = False
         self._loading = True
         try:
-            result = self._infer.predict(
-                jpeg,
-                weights_path=path,
-                meta=meta,
-                threshold=threshold,
-                speed=speed,
-                recording=recording,
-                draw=draw,
-                roi=roi,
-                roi_space=roi_space,
-            )
+            if halfyield:
+                bucket = calibration_store.bucket_thresholds(cal, class_names)
+                half_coef, piece_coef = calibration_store.mass_coefficients(cal)
+                result = self._infer.predict_roi(
+                    jpeg,
+                    weights_path=path,
+                    meta=meta,
+                    roi=dict(roi) if isinstance(roi, dict) else {},
+                    thresholds=bucket,
+                    recording=recording,
+                    draw=draw,
+                    roi_space=dict(roi_space) if isinstance(roi_space, dict) else None,
+                    full_frame=roi is None,
+                )
+                if result.get("ok"):
+                    half_area = float(result.get("half_area") or 0)
+                    piece_area = float(result.get("piece_area") or 0)
+                    share = area_share(half_area, piece_area)
+                    mass = Calibration(
+                        thresholds=bucket,
+                        half_mass_per_area=half_coef,
+                        piece_mass_per_area=piece_coef,
+                    ).mass_share(share)
+                    result["halfyield"] = True
+                    result["area_share"] = share
+                    result["mass_share"] = mass
+                    result["half_mass_per_area_g_per_model_pixel2"] = half_coef
+                    result["piece_mass_per_area_g_per_model_pixel2"] = piece_coef
+                    result["calibration"] = cal
+                    result["threshold"] = min(thresholds.values()) if thresholds else 0.3
+                    result["class_thresholds"] = dict(thresholds)
+                    # Counts from kept detections for the Check panel.
+                    counts: dict[str, int] = {}
+                    for item in result.get("items") or []:
+                        if not isinstance(item, dict):
+                            continue
+                        name = str(item.get("class") or "")
+                        if name:
+                            counts[name] = counts.get(name, 0) + 1
+                    result["counts"] = [
+                        {"class": name, "count": count} for name, count in counts.items()
+                    ]
+                    result["total"] = sum(counts.values())
+                    result["measurements"] = [
+                        {
+                            "class": name,
+                            "count": float(count),
+                            "area": float(
+                                half_area if "half" in name.lower()
+                                else piece_area if "piece" in name.lower()
+                                else 0.0
+                            ),
+                        }
+                        for name, count in counts.items()
+                    ]
+            else:
+                network_threshold = (
+                    min(thresholds.values()) if thresholds else float(threshold)
+                )
+                result = self._infer.predict(
+                    jpeg,
+                    weights_path=path,
+                    meta=meta,
+                    threshold=network_threshold,
+                    speed=speed,
+                    recording=recording,
+                    draw=draw,
+                    roi=roi,
+                    roi_space=roi_space,
+                    class_thresholds=thresholds,
+                )
+                if result.get("ok"):
+                    result["halfyield"] = False
+                    result["calibration"] = cal
+                    result["class_thresholds"] = dict(thresholds or {})
         finally:
             self._loading = False
         if not result.get("ok"):
@@ -550,11 +689,18 @@ class ModelService:
         return self._read_meta()
 
     def halfyield_weights_candidates(self) -> list[Path]:
-        return [
-            self.store_dir / "halfyield-model.pt",
-            self.root / "weights" / "halfyield-model.pt",
-            self.root / "halfyield-model.pt",
-        ]
+        names = (
+            "halfyield-model.pt",
+            "half-yield-analysis.pt",
+            "halfyield-analysis.pt",
+        )
+        candidates: list[Path] = []
+        for name in names:
+            candidates.append(self.store_dir / name)
+            candidates.append(self.library_dir() / name)
+            candidates.append(self.root / "weights" / name)
+            candidates.append(self.root / name)
+        return candidates
 
     def halfyield_weights_path(self) -> Path | None:
         for path in self.halfyield_weights_candidates():
@@ -628,12 +774,14 @@ class ModelService:
         self,
         jpeg: bytes,
         *,
-        roi: dict[str, Any],
+        roi: dict[str, Any] | None,
         thresholds: dict[str, float],
         weights_path: Path | None = None,
         meta: dict[str, Any] | None = None,
         min_area_px: float = 30.0,
         draw: bool = True,
+        roi_space: dict[str, Any] | None = None,
+        full_frame: bool = False,
     ) -> dict[str, Any]:
         if jpeg is None:
             raise RuntimeError("No video frame is available.")
@@ -660,6 +808,8 @@ class ModelService:
                 recording=recording,
                 min_area_px=min_area_px,
                 draw=draw,
+                roi_space=roi_space,
+                full_frame=full_frame or roi is None,
             )
         finally:
             self._loading = False

@@ -64,18 +64,23 @@ def worker_main(request_q: Any, response_q: Any) -> None:
                 loaded_mtime = mtime
                 loaded_meta_sig = meta_sig
             if cmd == "predict_roi":
+                raw_roi = job.get("roi")
+                raw_space = job.get("roi_space")
                 result = predict_roi_frame(
                     model,
                     job["jpeg"],
                     meta,
-                    roi=dict(job.get("roi") or {}),
+                    roi=dict(raw_roi) if isinstance(raw_roi, dict) else None,
                     thresholds=dict(job.get("thresholds") or {}),
                     min_area_px=float(job.get("min_area_px", 30.0)),
                     draw=bool(job.get("draw", True)),
+                    roi_space=dict(raw_space) if isinstance(raw_space, dict) else None,
+                    full_frame=bool(job.get("full_frame")),
                 )
             else:
                 raw_roi = job.get("roi")
                 raw_space = job.get("roi_space")
+                raw_class = job.get("class_thresholds")
                 result = predict_frame(
                     model,
                     job["jpeg"],
@@ -85,6 +90,11 @@ def worker_main(request_q: Any, response_q: Any) -> None:
                     draw=bool(job.get("draw", True)),
                     roi=dict(raw_roi) if isinstance(raw_roi, dict) else None,
                     roi_space=dict(raw_space) if isinstance(raw_space, dict) else None,
+                    class_thresholds=(
+                        {str(k): float(v) for k, v in raw_class.items()}
+                        if isinstance(raw_class, dict)
+                        else None
+                    ),
                 )
             response_q.put(result)
         except Exception as exc:  # noqa: BLE001
@@ -147,6 +157,7 @@ class InferClient:
         draw: bool = True,
         roi: dict[str, Any] | None = None,
         roi_space: dict[str, Any] | None = None,
+        class_thresholds: dict[str, float] | None = None,
     ) -> dict[str, Any]:
         job: dict[str, Any] = {
             "cmd": "predict",
@@ -162,6 +173,8 @@ class InferClient:
             job["roi"] = dict(roi)
         if roi_space is not None:
             job["roi_space"] = dict(roi_space)
+        if class_thresholds is not None:
+            job["class_thresholds"] = dict(class_thresholds)
         return self._submit(job)
 
     def predict_roi(
@@ -170,25 +183,30 @@ class InferClient:
         *,
         weights_path: Path,
         meta: dict[str, Any],
-        roi: dict[str, Any],
+        roi: dict[str, Any] | None,
         thresholds: dict[str, float],
         recording: bool,
         min_area_px: float = 30.0,
         draw: bool = True,
+        roi_space: dict[str, Any] | None = None,
+        full_frame: bool = False,
     ) -> dict[str, Any]:
-        return self._submit(
-            {
-                "cmd": "predict_roi",
-                "jpeg": jpeg,
-                "weights_path": str(weights_path),
-                "meta": meta,
-                "roi": dict(roi),
-                "thresholds": dict(thresholds),
-                "min_area_px": float(min_area_px),
-                "recording": recording,
-                "draw": bool(draw),
-            }
-        )
+        job: dict[str, Any] = {
+            "cmd": "predict_roi",
+            "jpeg": jpeg,
+            "weights_path": str(weights_path),
+            "meta": meta,
+            "thresholds": dict(thresholds),
+            "min_area_px": float(min_area_px),
+            "recording": recording,
+            "draw": bool(draw),
+            "full_frame": bool(full_frame),
+        }
+        if roi is not None:
+            job["roi"] = dict(roi)
+        if roi_space is not None:
+            job["roi_space"] = dict(roi_space)
+        return self._submit(job)
 
     def _submit(self, job: dict[str, Any]) -> dict[str, Any]:
         from segment_inspect import ModelBusy  # noqa: PLC0415

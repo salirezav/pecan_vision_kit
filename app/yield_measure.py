@@ -103,6 +103,40 @@ def class_ids_for(names: list[str] | dict[Any, Any]) -> dict[str, set[int]]:
     return out
 
 
+def is_halfyield_classes(names: list[str] | dict[Any, Any] | None) -> bool:
+    """True when the model has both half and piece classes (half-yield task)."""
+    if not names:
+        return False
+    ids = class_ids_for(names)
+    return bool(ids["half"] and ids["piece"])
+
+
+def area_share(half_area: float, piece_area: float) -> float | None:
+    total = float(half_area) + float(piece_area)
+    if total <= 0:
+        return None
+    return float(half_area) / total
+
+
+def integrated_area_totals(
+    samples: list[tuple[float, float, float]],
+) -> tuple[float, float]:
+    """Time-integrate half and piece areas; returns (half_integral, piece_integral)."""
+    if len(samples) < 2:
+        return 0.0, 0.0
+    half_integral = 0.0
+    piece_integral = 0.0
+    for index in range(len(samples) - 1):
+        t0, half0, piece0 = samples[index]
+        t1 = samples[index + 1][0]
+        elapsed = t1 - t0
+        if elapsed <= 0:
+            continue
+        half_integral += half0 * elapsed
+        piece_integral += piece0 * elapsed
+    return half_integral, piece_integral
+
+
 def integrated_ratio_last(samples: list[tuple[float, float, float]], window_ms: float) -> float | None:
     """Integrate half/(half+piece) over the window using each interval's left sample."""
     if len(samples) < 2:

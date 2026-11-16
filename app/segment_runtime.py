@@ -7,6 +7,7 @@ The web process must not import this module.
 from __future__ import annotations
 
 import base64
+import math
 import os
 import time
 from pathlib import Path
@@ -154,6 +155,18 @@ def _load_rfdetr(path: Path, meta: dict[str, Any]) -> Any:
     return model
 
 
+def _class_cutoff(
+    name: str,
+    default: float,
+    class_thresholds: dict[str, float] | None,
+) -> float:
+    if not class_thresholds:
+        return float(default)
+    if name in class_thresholds:
+        return float(class_thresholds[name])
+    return float(default)
+
+
 def _run_ultralytics(
     model: Any,
     bgr: np.ndarray,
@@ -164,6 +177,7 @@ def _run_ultralytics(
     *,
     draw: bool = True,
     reference_side: int | None = None,
+    class_thresholds: dict[str, float] | None = None,
 ) -> tuple[np.ndarray, list[dict[str, Any]], dict[str, int], list[dict[str, Any]]]:
     kwargs: dict[str, Any] = {
         "imgsz": int(infer_size),
@@ -202,6 +216,8 @@ def _run_ultralytics(
         task,
         draw=draw,
         reference_side=reference_side,
+        class_thresholds=class_thresholds,
+        default_threshold=threshold,
     )
 
 
@@ -214,6 +230,7 @@ def _run_model(
     *,
     draw: bool = True,
     reference_side: int | None = None,
+    class_thresholds: dict[str, float] | None = None,
 ) -> tuple[np.ndarray, list[dict[str, Any]], dict[str, int], list[dict[str, Any]]]:
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
     predict_kwargs: dict[str, Any] = {
@@ -235,7 +252,14 @@ def _run_model(
     confidences = np.asarray(detections.confidence)
     boxes = np.asarray(detections.xyxy)
     masks = getattr(detections, "mask", None)
-    keep = list(range(len(class_ids)))
+    keep: list[int] = []
+    for index in range(len(class_ids)):
+        class_id = int(class_ids[index])
+        confidence = float(confidences[index]) if index < len(confidences) else 0.0
+        name = labels[class_id] if 0 <= class_id < len(labels) else f"Class {class_id + 1}"
+        if confidence < _class_cutoff(name, threshold, class_thresholds):
+            continue
+        keep.append(index)
 
     overlay = annotated.copy() if draw else None
     drew_mask = False
@@ -307,6 +331,31 @@ def _run_model(
     class_areas = {name: int(mask.sum()) for name, mask in union_masks.items()}
     return annotated, items, class_areas, instances
 
+def _resolve_class_thresholds(
+    labels: list[str],
+    threshold: float,
+    class_thresholds: dict[str, float] | None,
+) -> tuple[float, dict[str, float]]:
+    """Network cutoff (min) plus per-class map keyed by label name."""
+    base = min(0.95, max(0.05, float(threshold)))
+    if not class_thresholds:
+        return base, {name: base for name in labels}
+    cleaned: dict[str, float] = {}
+    for name, value in class_thresholds.items():
+        key = str(name)
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            number = base
+        if not math.isfinite(number):
+            number = base
+        cleaned[key] = min(0.95, max(0.05, number))
+    for name in labels:
+        cleaned.setdefault(name, base)
+    network = min(cleaned.values()) if cleaned else base
+    return network, cleaned
+
+
 def predict_frame(
     model: Any,
     jpeg: bytes,
@@ -317,11 +366,11 @@ def predict_frame(
     draw: bool = True,
     roi: dict[str, Any] | None = None,
     roi_space: dict[str, Any] | None = None,
+    class_thresholds: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     frame = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_COLOR)
     if frame is None:
         raise RuntimeError("Could not read the camera frame.")
-    threshold = min(0.95, max(0.05, float(threshold)))
     speed_key = speed if speed in SPEED_SIZES else "fast"
     started = time.perf_counter()
     family = str(meta.get("family") or "rfdetr")
@@ -339,6 +388,10 @@ def predict_frame(
             setattr(model, "_pecan_labels", list(labels))
         except Exception:  # noqa: BLE001
             pass
+
+    network_threshold, per_class = _resolve_class_thresholds(
+        labels, threshold, class_thresholds
+    )
 
     height, width = frame.shape[:2]
     # Strokes were tuned on the native frame. Scale them up when the painted
@@ -380,33 +433,36 @@ def predict_frame(
         annotated, items, class_areas, instances = run_hailo(
             model,
             work,
-            threshold,
+            network_threshold,
             labels,
             task,
             draw=draw,
             reference_side=reference_side,
+            class_thresholds=per_class,
         )
     elif family == "ultralytics":
         infer_size = yolo_infer_size(int(meta.get("resolution") or 640), speed_key)
         annotated, items, class_areas, instances = _run_ultralytics(
             model,
             work,
-            threshold,
+            network_threshold,
             labels,
             infer_size,
             task,
             draw=draw,
             reference_side=reference_side,
+            class_thresholds=per_class,
         )
     else:
         annotated, items, class_areas, instances = _run_model(
             model,
             work,
-            threshold,
+            network_threshold,
             labels,
             infer_size=SPEED_SIZES[speed_key],
             draw=draw,
             reference_side=reference_side,
+            class_thresholds=per_class,
         )
 
     image = None
@@ -436,7 +492,9 @@ def predict_frame(
         image = "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode("ascii")
     result_mode = (_TASKS.get(task) or _TASKS["segment"])["result_mode"]
     best = items[0] if items else None
-    match = best if best and float(best.get("confidence") or 0) >= threshold else None
+    best_name = str(best.get("class") or "") if best else ""
+    best_cut = per_class.get(best_name, network_threshold) if best_name else network_threshold
+    match = best if best and float(best.get("confidence") or 0) >= best_cut else None
     counts: dict[str, int] = {}
     if result_mode == "counts":
         for item in items:
@@ -475,7 +533,8 @@ def predict_frame(
     payload: dict[str, Any] = {
         "ok": True,
         "elapsed_ms": elapsed_ms,
-        "threshold": threshold,
+        "threshold": network_threshold,
+        "class_thresholds": dict(per_class),
         "speed": speed_key,
         "task": task,
         "result_mode": result_mode,
@@ -503,11 +562,13 @@ def predict_roi_frame(
     jpeg: bytes,
     meta: dict[str, Any],
     *,
-    roi: dict[str, int],
+    roi: dict[str, int] | None,
     thresholds: dict[str, float],
     min_area_px: float = MIN_AREA_PX,
     model_size: int = MODEL_SIZE,
     draw: bool = True,
+    roi_space: dict[str, Any] | None = None,
+    full_frame: bool = False,
 ) -> dict[str, Any]:
     """Crop ROI, run YOLO at fixed size, return model-space half/piece areas."""
     frame = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_COLOR)
@@ -516,10 +577,10 @@ def predict_roi_frame(
     started = time.perf_counter()
     family = str(meta.get("family") or "ultralytics")
     if family != "ultralytics":
-        raise RuntimeError("Half-yield review needs a YOLO segmentation model.")
+        raise RuntimeError("Half-yield needs a YOLO segmentation model.")
     task = str(meta.get("task") or "segment")
     if task not in {"segment", "semantic"}:
-        raise RuntimeError("Half-yield review needs a segmentation model.")
+        raise RuntimeError("Half-yield needs a segmentation model.")
 
     cached = getattr(model, "_pecan_labels", None)
     labels = list(cached) if isinstance(cached, (list, tuple)) else None
@@ -536,7 +597,21 @@ def predict_roi_frame(
             pass
 
     height, width = frame.shape[:2]
-    clipped = clip_roi_to_frame(roi, width, height)
+    if full_frame or not roi:
+        clipped = {"x": 0, "y": 0, "w": int(width), "h": int(height)}
+    else:
+        mapped = {
+            "x": int(roi.get("x", 0)),
+            "y": int(roi.get("y", 0)),
+            "w": int(roi.get("w", 0)),
+            "h": int(roi.get("h", 0)),
+        }
+        if isinstance(roi_space, dict):
+            src_w = int(roi_space.get("width") or 0)
+            src_h = int(roi_space.get("height") or 0)
+            if src_w > 0 and src_h > 0 and (src_w != width or src_h != height):
+                mapped = scale_roi_to_frame(mapped, src_w, src_h, width, height)
+        clipped = clip_roi_to_frame(mapped, width, height)
     if clipped is None:
         raise RuntimeError("The measurement region does not fit this frame.")
 

@@ -9,11 +9,8 @@
   const checkBtn = document.getElementById("btn-check");
   const startBtn = document.getElementById("btn-start");
   const stopBtn = document.getElementById("btn-stop");
-  const thresholdEl = document.getElementById("threshold");
-  const thresholdValue = document.getElementById("threshold-value");
-  const confidenceRow = document.getElementById("confidence-row");
-  const confidenceLabel = document.getElementById("confidence-label");
   const speedEl = document.getElementById("speed");
+  const speedRow = document.getElementById("speed-row");
   const resultEl = document.getElementById("result");
   const emptyEl = document.getElementById("result-empty");
   const resultCaption = document.getElementById("result-caption");
@@ -45,6 +42,21 @@
   const roiStatusEl = document.getElementById("roi-status");
   const roiRedrawBtn = document.getElementById("btn-roi-redraw");
   const roiClearBtn = document.getElementById("btn-roi-clear");
+  const calibration = window.CalibrationUi
+    ? window.CalibrationUi.bind({
+        root: document.getElementById("calibration"),
+        sliders: document.getElementById("calibration-sliders"),
+        hint: document.getElementById("calibration-hint"),
+        onError: (err) => setMsg(err.message || String(err), "err"),
+        onChange: (record) => {
+          if (model) model.calibration = record;
+          if (isHalfyield() && yieldSamples.length) {
+            recomputeYieldMass();
+            renderMetrics();
+          }
+        },
+      })
+    : null;
 
   const PECAN_REQUIRED = [
     "pecan_uncracked",
@@ -82,6 +94,68 @@
   let runFrames = 0;
   let pecanRun = emptyPecanRun();
   let suggestIndex = -1;
+  let yieldSamples = [];
+  let massShareFrame = null;
+  let massShareRun = null;
+  let halfAreaFrame = 0;
+  let pieceAreaFrame = 0;
+
+  function isHalfyield() {
+    return Boolean(model && model.halfyield);
+  }
+
+  function massCoefficients() {
+    const record = (calibration && calibration.current()) || (model && model.calibration) || {};
+    const half = Number(record.half_mass_per_area_g_per_model_pixel2);
+    const piece = Number(record.piece_mass_per_area_g_per_model_pixel2);
+    return {
+      half: Number.isFinite(half) && half > 0 ? half : 0.001,
+      piece: Number.isFinite(piece) && piece > 0 ? piece : 0.001,
+    };
+  }
+
+  function areaShare(half, piece) {
+    const total = Number(half) + Number(piece);
+    if (!(total > 0)) return null;
+    return Number(half) / total;
+  }
+
+  function massShareFromArea(share) {
+    if (share == null || !Number.isFinite(share)) return null;
+    const coef = massCoefficients();
+    const half = share * coef.half;
+    const piece = (1 - share) * coef.piece;
+    const total = half + piece;
+    if (!(total > 0)) return null;
+    return half / total;
+  }
+
+  function integratedYieldShare(samples) {
+    if (!samples || samples.length < 2) return null;
+    let halfIntegral = 0;
+    let pieceIntegral = 0;
+    for (let index = 0; index < samples.length - 1; index += 1) {
+      const t0 = samples[index][0];
+      const half0 = samples[index][1];
+      const piece0 = samples[index][2];
+      const t1 = samples[index + 1][0];
+      const elapsed = t1 - t0;
+      if (elapsed <= 0) continue;
+      halfIntegral += half0 * elapsed;
+      pieceIntegral += piece0 * elapsed;
+    }
+    return areaShare(halfIntegral, pieceIntegral);
+  }
+
+  function recomputeYieldMass() {
+    massShareFrame = massShareFromArea(areaShare(halfAreaFrame, pieceAreaFrame));
+    massShareRun = massShareFromArea(integratedYieldShare(yieldSamples));
+  }
+
+  function formatPercent(value) {
+    if (value == null || !Number.isFinite(value)) return "—";
+    return (value * 100).toFixed(1) + "%";
+  }
 
   function setMsg(text, kind) {
     msgEl.textContent = text || "";
@@ -401,9 +475,38 @@
 
   function renderMetrics() {
     if (!metricsPanel) return;
-    const show = Boolean(model && model.installed && taskSupportsMetrics());
+    const show = Boolean(model && model.installed && (isHalfyield() || taskSupportsMetrics()));
     metricsPanel.hidden = !show;
     if (!show) return;
+
+    if (metricForm) metricForm.hidden = isHalfyield();
+
+    if (isHalfyield()) {
+      metricsNote.textContent =
+        "Half-yield uses a fixed estimated half mass share. Shell and obscured are confidence-gated and left out of the formula. Tune mass / area in Calibration.";
+      const frameText = formatPercent(massShareFrame);
+      const runText = formatPercent(massShareRun);
+      const runDetail = runFrames
+        ? "Time-integrated mass share · " + runFrames + " frame" + (runFrames === 1 ? "" : "s")
+        : "Start Keep checking to accumulate a run";
+      metricsList.innerHTML =
+        "<article class=\"metric-card builtin\">" +
+        "<div class=\"metric-card-head\">" +
+        "<div><p class=\"metric-card-name\">Est. half mass share" +
+        "<span class=\"metric-badge\">built-in</span></p>" +
+        "<p class=\"metric-card-formula\">mass_share(half, piece)</p></div>" +
+        "</div>" +
+        "<dl class=\"metric-values\">" +
+        "<div class=\"metric-value\"><dt>This frame</dt><dd>" + escapeHtml(frameText) +
+        "<span class=\"metric-detail\">" +
+        (massShareFrame == null ? "No half or piece area in this frame" : "From this frame’s half and piece areas") +
+        "</span></dd></div>" +
+        "<div class=\"metric-value\"><dt>This run</dt><dd>" + escapeHtml(runText) +
+        "<span class=\"metric-detail\">" + escapeHtml(runDetail) + "</span></dd></div>" +
+        "</dl></article>";
+      resetRunBtn.disabled = runFrames === 0 && !yieldSamples.length;
+      return;
+    }
 
     if (!classNames().length) {
       metricsNote.textContent = "Save class names on the model before building a metric.";
@@ -468,6 +571,11 @@
     runSums = {};
     runFrames = 0;
     pecanRun = emptyPecanRun();
+    yieldSamples = [];
+    massShareFrame = null;
+    massShareRun = null;
+    halfAreaFrame = 0;
+    pieceAreaFrame = 0;
     renderMetrics();
   }
 
@@ -511,10 +619,12 @@
     cardEl.hidden = !installed;
     namesField.hidden = installed && model.names_editable === false;
     namesBtn.hidden = namesField.hidden;
-    confidenceRow.hidden = installed && model.uses_confidence === false;
+    if (speedRow) speedRow.hidden = installed && isHalfyield();
+    if (calibration) calibration.render(model, model.calibration);
     if (installed) {
       const size = formatBytes(model.bytes);
-      statusEl.textContent = "Using " + (model.filename || "model") + (size ? " (" + size + ")" : "") + ".";
+      statusEl.textContent = "Using " + (model.filename || "model") + (size ? " (" + size + ")" : "") +
+        (isHalfyield() ? " · half-yield" : "") + ".";
       statusEl.className = model.library_ready ? "msg ok" : "msg";
       kindEl.textContent = model.kind || "Model";
       doesEl.textContent = model.does || "";
@@ -533,7 +643,6 @@
       if (document.activeElement !== namesEl) {
         namesEl.value = (model.class_names || []).join(", ");
       }
-      confidenceLabel.textContent = model.confidence_label || "Confidence";
       if (!busy) checkBtn.textContent = model.check_label || "Check this frame";
       resultCaption.textContent = model.result_label || "Model result";
       if (resultEl.hidden) emptyEl.textContent = model.empty_label || "The model result will show up here.";
@@ -662,6 +771,8 @@
       resetBuilder();
       clearResult();
       renderStatus();
+      if (!isHalfyield()) await refreshMetrics();
+      else renderMetrics();
       if (!model.error) setMsg("Now using " + (model.filename || "the selected model") + ".", "ok");
     } catch (err) {
       setMsg(err.message || String(err), "err");
@@ -731,7 +842,7 @@
     }
     if (!data.total) {
       countsEl.innerHTML = "";
-      setMsg("Nothing found in " + seconds + "s. Lower the confidence and try again.", "ok");
+      setMsg("Nothing found in " + seconds + "s. Lower a class confidence in Calibration and try again.", "ok");
       return;
     }
     const rows = (data.counts || [])
@@ -750,10 +861,14 @@
     const controller = new AbortController();
     runAbort = controller;
     try {
+      const cal = calibration ? calibration.current() : (model && model.calibration) || null;
       const payload = {
-        threshold: Number(thresholdEl.value),
-        speed: speedEl ? speedEl.value : "fast",
+        speed: isHalfyield() ? "accurate" : (speedEl ? speedEl.value : "fast"),
       };
+      if (cal) {
+        payload.calibration = cal;
+        payload.class_thresholds = cal.class_confidence || {};
+      }
       if (cameraRoi) payload.roi = cameraRoi;
       else payload.roi = null;
       const response = await fetch("/api/model/run", {
@@ -772,7 +887,22 @@
       }
       if (model) model.loaded = true;
       frameMeasurements = measurementsMap(data.measurements || []);
-      if (accumulate) {
+      if (isHalfyield() || data.halfyield) {
+        halfAreaFrame = Number(data.half_area) || 0;
+        pieceAreaFrame = Number(data.piece_area) || 0;
+        massShareFrame = data.mass_share != null ? Number(data.mass_share) : massShareFromArea(areaShare(halfAreaFrame, pieceAreaFrame));
+        if (accumulate) {
+          const now = Date.now();
+          const stamp = yieldSamples.length && now <= yieldSamples[yieldSamples.length - 1][0]
+            ? yieldSamples[yieldSamples.length - 1][0] + 1
+            : now;
+          yieldSamples.push([stamp, halfAreaFrame, pieceAreaFrame]);
+          runFrames += 1;
+          massShareRun = massShareFromArea(integratedYieldShare(yieldSamples));
+        } else {
+          recomputeYieldMass();
+        }
+      } else if (accumulate) {
         addFrameToRun(data.measurements || []);
         if (pecanClassesReady()) mergePecanSamples(data.pecan_samples);
       }
@@ -806,10 +936,6 @@
       selectModel(button.getAttribute("data-model-id"));
     });
   }
-
-  thresholdEl.addEventListener("input", () => {
-    thresholdValue.textContent = Math.round(Number(thresholdEl.value) * 100) + "%";
-  });
 
   formEl.addEventListener("submit", async (event) => {
     event.preventDefault();

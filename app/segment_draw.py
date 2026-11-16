@@ -172,6 +172,8 @@ def _draw_ultralytics_instances(
     *,
     draw: bool = True,
     reference_side: int | None = None,
+    class_thresholds: dict[str, float] | None = None,
+    default_threshold: float = 0.5,
 ) -> tuple[np.ndarray, list[dict[str, Any]], dict[str, int], list[dict[str, Any]]]:
     boxes = None
     corners = None
@@ -201,12 +203,17 @@ def _draw_ultralytics_instances(
     drew_mask = False
     items: list[dict[str, Any]] = []
     instances: list[dict[str, Any]] = []
-    pending: list[tuple[int, float, str, tuple[int, int, int], tuple[int, int]]] = []
+    pending: list[tuple[int, int, float, str, tuple[int, int, int], tuple[int, int]]] = []
     polygons_by_class: dict[str, list[np.ndarray]] = {}
     for index, class_id in enumerate(class_ids):
         class_id = int(class_id)
         confidence = float(confidences[index]) if index < len(confidences) else 0.0
         name = labels[class_id] if 0 <= class_id < len(labels) else f"Class {class_id + 1}"
+        cutoff = float(default_threshold)
+        if class_thresholds and name in class_thresholds:
+            cutoff = float(class_thresholds[name])
+        if confidence < cutoff:
+            continue
         color = _COLORS[class_id % len(_COLORS)]
         polygon = None
         if polygons is not None and index < len(polygons):
@@ -249,14 +256,14 @@ def _draw_ultralytics_instances(
             instance["area"] = max(0.0, (box[2] - box[0]) * (box[3] - box[1]))
         instances.append(instance)
         anchor = _label_anchor(boxes, corners, index)
-        pending.append((class_id, confidence, name, color, anchor))
+        pending.append((index, class_id, confidence, name, color, anchor))
         items.append({"class": name, "confidence": round(confidence, 3)})
     if draw and drew_mask and overlay is not None:
         annotated = cv2.addWeighted(overlay, 0.45, annotated, 0.55, 0)
     if draw:
         thickness = overlay_thickness(annotated, reference_side)
         point_radius = max(1, int(round(3 * overlay_scale(annotated, reference_side))))
-        for index, (_class_id, confidence, name, color, anchor) in enumerate(pending):
+        for index, _class_id, confidence, name, color, anchor in pending:
             if corners is not None and index < len(corners):
                 pts = np.asarray(corners[index], dtype=np.int32).reshape(-1, 2)
                 cv2.polylines(annotated, [pts], True, color, thickness)

@@ -111,11 +111,4 @@ def deploy_page():
     )
 
 
-@bp.route("/review")
-def review_page():
-    return render_template(
-        "review.html",
-        kit_id=rt.settings.get("kit_id", "??"),
-        review=rt.review_live.status(),
-    )
 

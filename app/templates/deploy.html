@@ -4,7 +4,7 @@
 <section class="deploy-layout">
   <div class="controls deploy-controls">
     <div class="deploy-controls-main">
-      <p class="hint">Live monitoring for metrics you set up on the <a href="{{ url_for('ui.model_page') }}">Model</a> page. Draw the camera region there; Deploy uses the same region. Start a run to fill the charts below.</p>
+      <p class="hint">Live monitoring for metrics you set up on the <a href="{{ url_for('ui.model_page') }}">Model</a> page. Half-yield shows its fixed mass-share KPI here. Draw the camera region on Model; Deploy uses the same region. Calibration is shared with Model.</p>
       <p id="model-status" class="msg">Looking for a model…</p>
       <div id="model-card" class="model-card deploy-model-card" hidden>
         <div class="deploy-model-info">
@@ -24,11 +24,12 @@
     </div>
 
     <div class="deploy-controls-run">
-      <label id="confidence-row" class="threshold-row deploy-field"><span id="confidence-label">Confidence</span>
-        <input id="threshold" type="range" min="0.05" max="0.95" step="0.05" value="0.50">
-        <span id="threshold-value">50%</span>
-      </label>
-      <label class="speed-row deploy-field">Speed
+      <details id="calibration" class="panel calibration-panel deploy-field">
+        <summary>Calibration</summary>
+        <p id="calibration-hint" class="hint">Per-class confidence. Changes save automatically and apply on the next live sample.</p>
+        <div id="calibration-sliders" class="sliders"></div>
+      </details>
+      <label id="speed-row" class="speed-row deploy-field">Speed
         <select id="speed">
           <option value="fast" selected>Fast</option>
           <option value="balanced">Balanced</option>
@@ -88,5 +89,6 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='roi-draw.js') }}"></script>
 <script src="{{ url_for('static', filename='metric-formula.js') }}"></script>
+<script src="{{ url_for('static', filename='calibration-ui.js') }}"></script>
 <script src="{{ url_for('static', filename='deploy.js') }}"></script>
 {% endblock %}

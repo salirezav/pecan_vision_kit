@@ -71,8 +71,17 @@ def _pecan_columns() -> list[str]:
     ]
 
 
-def _header(class_names: list[str], metrics: list[dict[str, Any]]) -> list[str]:
-    return [
+def _halfyield_columns() -> list[str]:
+    return ["half_area", "piece_area", "mass_share", "mass_share_run"]
+
+
+def _header(
+    class_names: list[str],
+    metrics: list[dict[str, Any]],
+    *,
+    halfyield: bool = False,
+) -> list[str]:
+    cols = [
         "timestamp_iso",
         "elapsed_ms",
         "threshold",
@@ -80,8 +89,12 @@ def _header(class_names: list[str], metrics: list[dict[str, Any]]) -> list[str]:
         "sample_interval_sec",
         *_class_columns(class_names),
         *_metric_columns(metrics),
-        *_pecan_columns(),
     ]
+    if halfyield:
+        cols.extend(_halfyield_columns())
+    else:
+        cols.extend(_pecan_columns())
+    return cols
 
 
 def open_run(
@@ -94,6 +107,7 @@ def open_run(
     requested_interval_sec: float,
     roi: dict[str, int] | None,
     model_filename: str | None,
+    halfyield: bool = False,
 ) -> dict[str, Any]:
     import time as _time  # noqa: PLC0415
 
@@ -106,7 +120,7 @@ def open_run(
         run_id = datetime.now().strftime("%Y%m%dT%H%M%S")
     folder = root / run_id
     folder.mkdir(parents=True, exist_ok=False)
-    header = _header(list(class_names), list(metrics))
+    header = _header(list(class_names), list(metrics), halfyield=halfyield)
     summary = {
         "id": run_id,
         "status": "running",
@@ -117,6 +131,7 @@ def open_run(
         "speed": speed,
         "interval_sec": interval_sec,
         "requested_interval_sec": requested_interval_sec,
+        "halfyield": bool(halfyield),
         "roi": dict(roi) if roi else None,
         "full_frame": roi is None,
         "model_filename": model_filename,
@@ -143,6 +158,7 @@ def append_sample(
     frame_map: dict[str, dict[str, float]],
     frame_values: dict[str, dict[str, float] | None],
     pecan_builtins: dict[str, dict[str, Any]] | None = None,
+    halfyield: dict[str, Any] | None = None,
 ) -> None:
     folder = run_dir(run_id)
     path = folder / "samples.csv"
@@ -164,23 +180,28 @@ def append_sample(
             row.append("")
             continue
         row.append(float(parts["value"]))
-    builtins = pecan_builtins or {}
-    for mid in (
-        "pecan_exposed_kernel_mean",
-        "pecan_exposed_kernel_median",
-        "pecan_broken_kernel_area_per_100",
-    ):
-        card = builtins.get(mid) or {}
-        if card.get("value") is not None:
-            row.append(float(card["value"]))
-        else:
-            row.append("")
-    pecan_n = 0
-    for card in builtins.values():
-        if isinstance(card, dict) and card.get("n") is not None:
-            pecan_n = int(card.get("n") or 0)
-            break
-    row.append(pecan_n)
+    if halfyield is not None:
+        for key in ("half_area", "piece_area", "mass_share", "mass_share_run"):
+            value = halfyield.get(key)
+            row.append("" if value is None else float(value))
+    else:
+        builtins = pecan_builtins or {}
+        for mid in (
+            "pecan_exposed_kernel_mean",
+            "pecan_exposed_kernel_median",
+            "pecan_broken_kernel_area_per_100",
+        ):
+            card = builtins.get(mid) or {}
+            if card.get("value") is not None:
+                row.append(float(card["value"]))
+            else:
+                row.append("")
+        pecan_n = 0
+        for card in builtins.values():
+            if isinstance(card, dict) and card.get("n") is not None:
+                pecan_n = int(card.get("n") or 0)
+                break
+        row.append(pecan_n)
     with _write_lock:
         with path.open("a", newline="", encoding="utf-8") as handle:
             csv.writer(handle).writerow(row)

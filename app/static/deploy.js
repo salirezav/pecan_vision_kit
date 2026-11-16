@@ -4,11 +4,8 @@
   const startBtn = document.getElementById("btn-start");
   const stopBtn = document.getElementById("btn-stop");
   const resetBtn = document.getElementById("btn-reset-run");
-  const thresholdEl = document.getElementById("threshold");
-  const thresholdValue = document.getElementById("threshold-value");
-  const confidenceRow = document.getElementById("confidence-row");
-  const confidenceLabel = document.getElementById("confidence-label");
   const speedEl = document.getElementById("speed");
+  const speedRow = document.getElementById("speed-row");
   const resultEl = document.getElementById("result");
   const emptyEl = document.getElementById("result-empty");
   const resultCaption = document.getElementById("result-caption");
@@ -36,6 +33,7 @@
   const closeRunBtn = document.getElementById("btn-close-run");
 
   const COLORS = ["#c4a35a", "#7dcea0", "#5dade2", "#f5b041", "#af7ac5", "#e74c3c", "#48c9b0", "#f4d03f"];
+  const HALFYIELD_METRIC_ID = "halfyield_mass_share";
 
   let model = null;
   let metrics = [];
@@ -49,6 +47,32 @@
   let pollTimer = null;
   let runId = null;
   let roiDrawer = null;
+  let halfyield = false;
+  let massShare = null;
+  let massShareFrame = null;
+
+  const calibration = window.CalibrationUi
+    ? window.CalibrationUi.bind({
+        root: document.getElementById("calibration"),
+        sliders: document.getElementById("calibration-sliders"),
+        hint: document.getElementById("calibration-hint"),
+        onError: (err) => setMsg(err.message || String(err), "err"),
+        onChange: (record) => {
+          if (model) model.calibration = record;
+          // Deploy live loop reloads calibration; refresh UI from status soon.
+          if (live) refreshLive({ quiet: true });
+        },
+      })
+    : null;
+
+  function isHalfyield() {
+    return Boolean(halfyield || (model && model.halfyield));
+  }
+
+  function formatPercent(value) {
+    if (value == null || !Number.isFinite(value)) return "—";
+    return (value * 100).toFixed(1) + "%";
+  }
 
   function setMsg(text, kind) {
     msgEl.textContent = text || "";
@@ -182,10 +206,39 @@
 
   function renderBoard() {
     metaFrames.textContent = String(runFrames);
-    const panelCount = metrics.length + (pecanReady ? 3 : 0);
-    metaMetrics.textContent = String(panelCount);
     metaLive.textContent = live ? "Live" : (runFrames ? "Stopped" : "Idle");
 
+    if (isHalfyield()) {
+      metaMetrics.textContent = "1";
+      const color = COLORS[0];
+      const series = histories[HALFYIELD_METRIC_ID] || [];
+      const runText = formatPercent(massShare);
+      const frame = frameValues[HALFYIELD_METRIC_ID];
+      const frameText = frame && frame.value != null
+        ? formatPercent(frame.value)
+        : formatPercent(massShareFrame);
+      noteEl.textContent = live
+        ? "Half-yield mass share updating on each sample."
+        : (runFrames
+          ? "Last half-yield run is still on the chart. Start again for a new series."
+          : "Press Start live run to fill the half-yield chart.");
+      gridEl.innerHTML =
+        '<article class="grafana-panel">' +
+        '<div class="grafana-panel-head">' +
+        '<div><p class="grafana-title">Est. half mass share <span class="metric-badge">built-in</span></p>' +
+        '<p class="grafana-formula">mass_share(half, piece)</p></div>' +
+        '<p class="grafana-big" style="color:' + color + '">' + escapeHtml(runText) + "</p>" +
+        "</div>" +
+        chartSvg(series.map((value) => (value == null ? null : value * 100)), color) +
+        '<div class="grafana-foot">' +
+        "<span>This frame <strong>" + escapeHtml(frameText) + "</strong></span>" +
+        "<span>Time-integrated mass share for the run</span>" +
+        "</div></article>";
+      return;
+    }
+
+    const panelCount = metrics.length + (pecanReady ? 3 : 0);
+    metaMetrics.textContent = String(panelCount);
     const parts = [];
     let colorOffset = renderBuiltinPanels(parts, 0);
     metrics.forEach((metric, index) => {
@@ -314,12 +367,12 @@
     pecanBuiltins = data.pecan_builtins || {};
     pecanReady = Boolean(data.pecan_ready);
     metrics = data.metrics || metrics;
+    halfyield = Boolean(data.halfyield || (data.model && data.model.halfyield));
+    massShare = data.mass_share != null ? Number(data.mass_share) : null;
+    massShareFrame = data.mass_share_frame != null ? Number(data.mass_share_frame) : null;
     if (data.model) model = data.model;
-    if (data.threshold != null && document.activeElement !== thresholdEl) {
-      thresholdEl.value = String(data.threshold);
-      thresholdValue.textContent = Math.round(Number(thresholdEl.value) * 100) + "%";
-    }
-    if (data.speed && document.activeElement !== speedEl) {
+    if (data.calibration && model) model.calibration = data.calibration;
+    if (data.speed && speedEl && document.activeElement !== speedEl) {
       speedEl.value = data.speed;
     }
     if (data.interval_sec != null && intervalEl && document.activeElement !== intervalEl) {
@@ -353,9 +406,11 @@
     }
     const installed = Boolean(model.installed);
     cardEl.hidden = !installed;
-    confidenceRow.hidden = installed && model.uses_confidence === false;
+    if (speedRow) speedRow.hidden = installed && isHalfyield();
+    if (calibration) calibration.render(model, model.calibration || null);
     if (installed) {
-      statusEl.textContent = "Using " + (model.filename || "model") + ".";
+      statusEl.textContent = "Using " + (model.filename || "model") +
+        (isHalfyield() ? " · half-yield" : "") + ".";
       statusEl.className = model.library_ready ? "msg ok" : "msg";
       kindEl.textContent = model.kind || "Model";
       doesEl.textContent = model.does || "";
@@ -363,7 +418,6 @@
         const color = (model.class_colors || [])[index] || "#c4a35a";
         return "<li><span class=\"swatch\" style=\"background:" + color + "\"></span>" + escapeHtml(name) + "</li>";
       }).join("");
-      confidenceLabel.textContent = model.confidence_label || "Confidence";
       resultCaption.textContent = model.result_label || "Model result";
       if (resultEl.hidden) {
         emptyEl.hidden = false;
@@ -400,10 +454,6 @@
     }
   }
 
-  thresholdEl.addEventListener("input", () => {
-    thresholdValue.textContent = Math.round(Number(thresholdEl.value) * 100) + "%";
-  });
-
   startBtn.addEventListener("click", async () => {
     if (live || !modelReady()) return;
     setMsg("Starting live run…", "");
@@ -411,12 +461,13 @@
     emptyEl.hidden = false;
     emptyEl.textContent = "Waiting for the first sample…";
     try {
+      // Persist current calibration so Start and live samples share the same values.
+      if (calibration) await calibration.persist();
       const response = await fetch("/api/deploy/live/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          threshold: Number(thresholdEl.value),
-          speed: speedEl ? speedEl.value : "fast",
+          speed: isHalfyield() ? "accurate" : (speedEl ? speedEl.value : "fast"),
           interval_sec: intervalEl ? Number(intervalEl.value) : 1.0,
         }),
       });
