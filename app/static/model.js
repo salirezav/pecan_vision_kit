@@ -19,6 +19,9 @@
   const resultCaption = document.getElementById("result-caption");
   const countsEl = document.getElementById("counts");
   const cardEl = document.getElementById("model-card");
+  const libraryHintEl = document.getElementById("model-library-hint");
+  const modelListEl = document.getElementById("model-list");
+  const modelListEmptyEl = document.getElementById("model-list-empty");
   const kindEl = document.getElementById("model-kind");
   const doesEl = document.getElementById("model-does");
   const factsEl = document.getElementById("model-facts");
@@ -31,24 +34,53 @@
   const metricsList = document.getElementById("metrics-list");
   const metricForm = document.getElementById("metric-form");
   const metricNameEl = document.getElementById("metric-name");
-  const metricMeasureRow = document.getElementById("metric-measure-row");
-  const metricNumEl = document.getElementById("metric-num");
-  const metricDenEl = document.getElementById("metric-den");
+  const metricFormulaInput = document.getElementById("metric-formula-input");
+  const metricFormulaSuggest = document.getElementById("metric-formula-suggest");
   const metricFormulaEl = document.getElementById("metric-formula");
   const metricSaveBtn = document.getElementById("btn-metric-save");
   const metricCancelBtn = document.getElementById("btn-metric-cancel");
   const resetRunBtn = document.getElementById("btn-reset-run");
+  const cameraWrap = document.getElementById("camera-wrap");
+  const cameraPreview = document.getElementById("camera-preview");
+  const roiStatusEl = document.getElementById("roi-status");
+  const roiRedrawBtn = document.getElementById("btn-roi-redraw");
+  const roiClearBtn = document.getElementById("btn-roi-clear");
+
+  const PECAN_REQUIRED = [
+    "pecan_uncracked",
+    "pecan_hairline",
+    "pecan_open",
+    "pecan_crushed",
+    "kernel_region",
+    "kernel_broken",
+  ];
+  const MIN_PECANS = 200;
+
+  function emptyPecanRun() {
+    return {
+      whole_pecan_areas: [],
+      broken_kernel_area: 0,
+      exposed_kernel_ratios: [],
+      n: 0,
+      has_masks: false,
+    };
+  }
 
   let model = null;
   let live = false;
   let busy = false;
+  let selecting = false;
   let runAbort = null;
   let overrideNames = false;
   let metrics = [];
   let editingId = null;
   let frameMeasurements = null;
   let runSums = {};
+  let cameraRoi = null;
+  let roiDrawer = null;
   let runFrames = 0;
+  let pecanRun = emptyPecanRun();
+  let suggestIndex = -1;
 
   function setMsg(text, kind) {
     msgEl.textContent = text || "";
@@ -65,7 +97,8 @@
     return String(value)
       .replaceAll("&", "&amp;")
       .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;");
+      .replaceAll(">", "&gt;")
+      .replaceAll("\"", "&quot;");
   }
 
   function classNames() {
@@ -77,109 +110,35 @@
     return task === "segment" || task === "detect" || task === "pose" || task === "obb" || task === "semantic";
   }
 
-  function supportsArea() {
-    const task = model && model.task;
-    return task === "segment" || task === "semantic";
+  function pecanClassesReady() {
+    const known = new Set(classNames());
+    return PECAN_REQUIRED.every((name) => known.has(name));
   }
 
-  function supportsCount() {
-    const task = model && model.task;
-    return task === "segment" || task === "detect" || task === "pose" || task === "obb";
+  function normalizeMetric(metric) {
+    return window.MetricFormula.normalizeMetric(metric);
   }
 
-  function selectedMeasure() {
-    const checked = metricForm.querySelector('input[name="metric-measure"]:checked');
-    return checked ? checked.value : "area";
-  }
-
-  function setMeasureOptions() {
-    const areaInput = metricForm.querySelector('input[value="area"]');
-    const countInput = metricForm.querySelector('input[value="count"]');
-    const areaLabel = areaInput.closest("label");
-    const countLabel = countInput.closest("label");
-    const areaOk = supportsArea();
-    const countOk = supportsCount();
-    areaLabel.hidden = !areaOk;
-    countLabel.hidden = !countOk;
-    metricMeasureRow.hidden = !(areaOk || countOk);
-    if (areaInput.checked && !areaOk && countOk) countInput.checked = true;
-    else if (countInput.checked && !countOk && areaOk) areaInput.checked = true;
-    else if (!areaInput.checked && !countInput.checked) {
-      if (areaOk) areaInput.checked = true;
-      else if (countOk) countInput.checked = true;
-    }
-  }
-
-  function selectedLabels(listEl) {
-    return Array.from(listEl.querySelectorAll("input:checked")).map((input) => input.value);
-  }
-
-  function formatTerm(measure, labels) {
-    if (!labels.length) return "—";
-    if (labels.length === 1) return measure + "(" + labels[0] + ")";
-    return labels.map((name) => measure + "(" + name + ")").join(" + ");
-  }
-
-  function formatFormula(measure, numerator, denominator) {
-    const top = formatTerm(measure, numerator);
-    const bottom = formatTerm(measure, denominator);
-    if (denominator.length > 1) return top + " / (" + bottom + ")";
-    return top + " / " + bottom;
-  }
-
-  function updateFormulaPreview() {
-    const measure = selectedMeasure();
-    const numerator = selectedLabels(metricNumEl);
-    const denominator = selectedLabels(metricDenEl);
-    if (!numerator.length || !denominator.length) {
-      metricFormulaEl.textContent = "Choose at least one label on each side.";
-      return;
-    }
-    metricFormulaEl.textContent = formatFormula(measure, numerator, denominator);
-  }
-
-  function renderChipList(listEl, selected) {
-    const names = classNames();
-    const selectedSet = new Set(selected);
-    listEl.innerHTML = names.map((name) => {
-      const checked = selectedSet.has(name) ? " checked" : "";
-      return (
-        "<li><label><input type=\"checkbox\" value=\"" +
-        escapeHtml(name) +
-        "\"" +
-        checked +
-        "> " +
-        escapeHtml(name) +
-        "</label></li>"
-      );
-    }).join("");
+  function metricFormula(metric) {
+    return normalizeMetric(metric).formula || "";
   }
 
   function resetBuilder(defaults) {
     editingId = null;
     metricNameEl.value = defaults && defaults.name ? defaults.name : "";
-    setMeasureOptions();
-    const measure = defaults && defaults.measure
-      ? defaults.measure
-      : (supportsArea() ? "area" : "count");
-    const measureInput = metricForm.querySelector('input[name="metric-measure"][value="' + measure + '"]');
-    if (measureInput && !measureInput.closest("label").hidden) measureInput.checked = true;
-    const names = classNames();
-    renderChipList(metricNumEl, (defaults && defaults.numerator) || []);
-    renderChipList(metricDenEl, (defaults && defaults.denominator) || names);
+    metricFormulaInput.value = defaults && defaults.formula ? defaults.formula : "";
+    hideSuggest();
     metricCancelBtn.hidden = true;
     metricSaveBtn.textContent = "Save metric";
     updateFormulaPreview();
   }
 
   function beginEdit(metric) {
+    const normalized = normalizeMetric(metric);
     editingId = metric.id;
-    metricNameEl.value = metric.name || "";
-    setMeasureOptions();
-    const measureInput = metricForm.querySelector('input[name="metric-measure"][value="' + metric.measure + '"]');
-    if (measureInput && !measureInput.closest("label").hidden) measureInput.checked = true;
-    renderChipList(metricNumEl, metric.numerator || []);
-    renderChipList(metricDenEl, metric.denominator || []);
+    metricNameEl.value = normalized.name || "";
+    metricFormulaInput.value = normalized.formula || "";
+    hideSuggest();
     metricCancelBtn.hidden = false;
     metricSaveBtn.textContent = "Update metric";
     updateFormulaPreview();
@@ -188,18 +147,7 @@
 
   function metricIsStale(metric) {
     const known = new Set(classNames());
-    const labels = [].concat(metric.numerator || [], metric.denominator || []);
-    return labels.some((name) => !known.has(name));
-  }
-
-  function sumLabels(source, labels, measure) {
-    let total = 0;
-    for (const name of labels) {
-      const row = source && source[name];
-      if (!row) continue;
-      total += Number(row[measure] || 0);
-    }
-    return total;
+    return window.MetricFormula.formulaLabels(metricFormula(metric)).some((name) => !known.has(name));
   }
 
   function measurementsMap(rows) {
@@ -213,28 +161,239 @@
     return map;
   }
 
-  function formatRatio(numerator, denominator, measure) {
-    if (!denominator) {
-      return { percent: "—", detail: "No " + measure + " in the chosen labels" };
+  function formatMetricValue(value) {
+    if (value == null || !Number.isFinite(value)) {
+      return { text: "—", detail: "No value for this formula" };
     }
-    const percent = ((numerator / denominator) * 100).toFixed(1) + "%";
-    const unit = measure === "area" ? "px" : "";
-    const detail = numerator.toLocaleString() + unit + " / " + denominator.toLocaleString() + unit;
-    return { percent, detail };
+    const abs = Math.abs(value);
+    let text;
+    if (abs >= 100) text = value.toFixed(1);
+    else if (abs >= 1) text = value.toFixed(2);
+    else text = value.toFixed(3);
+    return { text, detail: String(value) };
   }
 
   function evaluateMetric(metric, source) {
     if (metricIsStale(metric)) return null;
     if (!source) return null;
-    const numerator = sumLabels(source, metric.numerator || [], metric.measure);
-    const denominator = sumLabels(source, metric.denominator || [], metric.measure);
-    return formatRatio(numerator, denominator, metric.measure);
+    try {
+      const value = window.MetricFormula.evaluateFormula(metricFormula(metric), source);
+      return formatMetricValue(value);
+    } catch (_err) {
+      return null;
+    }
   }
 
-  function ensureBuilderChips() {
-    if (!taskSupportsMetrics() || !classNames().length) return;
-    if (metricNumEl.children.length || metricDenEl.children.length || editingId) return;
-    resetBuilder();
+  function updateFormulaPreview() {
+    if (!metricFormulaEl) return;
+    const formula = metricFormulaInput.value.trim();
+    if (!formula) {
+      metricFormulaEl.hidden = false;
+      metricFormulaEl.textContent = "Enter a formula using count(Class) or area(Class).";
+      return;
+    }
+    try {
+      window.MetricFormula.evaluateFormula(formula, {});
+      const unknown = window.MetricFormula.formulaLabels(formula).filter((name) => !classNames().includes(name));
+      if (unknown.length) {
+        metricFormulaEl.hidden = false;
+        metricFormulaEl.textContent = "Unknown class: " + unknown.join(", ");
+        return;
+      }
+      metricFormulaEl.hidden = true;
+      metricFormulaEl.textContent = "";
+    } catch (err) {
+      metricFormulaEl.hidden = false;
+      metricFormulaEl.textContent = err.message || String(err);
+    }
+  }
+
+  function hideSuggest() {
+    if (!metricFormulaSuggest) return;
+    metricFormulaSuggest.hidden = true;
+    metricFormulaSuggest.innerHTML = "";
+    suggestIndex = -1;
+  }
+
+  function activeSuggestToken() {
+    const value = metricFormulaInput.value;
+    const caret = metricFormulaInput.selectionStart || 0;
+    const before = value.slice(0, caret);
+    const match = before.match(/(?:count|area)\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)$/i);
+    if (!match) return null;
+    return {
+      start: caret - match[1].length,
+      end: caret,
+      query: match[1].toLowerCase(),
+    };
+  }
+
+  function renderSuggest() {
+    const token = activeSuggestToken();
+    if (!token) {
+      hideSuggest();
+      return;
+    }
+    const matches = classNames().filter((name) => name.toLowerCase().startsWith(token.query));
+    if (!matches.length) {
+      hideSuggest();
+      return;
+    }
+    suggestIndex = Math.min(suggestIndex, matches.length - 1);
+    if (suggestIndex < 0) suggestIndex = 0;
+    metricFormulaSuggest.innerHTML = matches.map((name, index) => (
+      "<li><button type=\"button\" data-name=\"" + escapeHtml(name) + "\" class=\"" +
+      (index === suggestIndex ? "active" : "") + "\">" + escapeHtml(name) + "</button></li>"
+    )).join("");
+    metricFormulaSuggest.hidden = false;
+  }
+
+  function insertSuggestion(name) {
+    const token = activeSuggestToken();
+    if (!token) return;
+    const value = metricFormulaInput.value;
+    const caret = metricFormulaInput.selectionStart || 0;
+    const next = value.slice(0, token.start) + name + value.slice(caret);
+    metricFormulaInput.value = next;
+    const pos = token.start + name.length;
+    metricFormulaInput.setSelectionRange(pos, pos);
+    hideSuggest();
+    updateFormulaPreview();
+    metricFormulaInput.focus();
+  }
+
+  function median(values) {
+    if (!values.length) return null;
+    const ordered = values.slice().sort((a, b) => a - b);
+    const mid = Math.floor(ordered.length / 2);
+    if (ordered.length % 2) return ordered[mid];
+    return (ordered[mid - 1] + ordered[mid]) / 2;
+  }
+
+  function summarizePecanRun(run) {
+    const n = Number(run.n || 0);
+    const ready = n >= MIN_PECANS;
+    const gateMessage = ready ? null : "insufficient data (" + n + " / " + MIN_PECANS + ")";
+    const areas = (run.whole_pecan_areas || []).map(Number).filter((v) => v > 0);
+    const exposed = (run.exposed_kernel_ratios || []).map(Number);
+    const hasMasks = Boolean(run.has_masks);
+    const cards = {
+      pecan_exposed_kernel_mean: {
+        id: "pecan_exposed_kernel_mean",
+        name: "Exposed-kernel mean",
+        ready,
+        n,
+        message: gateMessage,
+        value: null,
+        ci95: null,
+        detail: null,
+      },
+      pecan_exposed_kernel_median: {
+        id: "pecan_exposed_kernel_median",
+        name: "Exposed-kernel median",
+        ready,
+        n,
+        message: gateMessage,
+        value: null,
+        ci95: null,
+        detail: null,
+      },
+      pecan_broken_kernel_area_per_100: {
+        id: "pecan_broken_kernel_area_per_100",
+        name: "Broken-kernel area per 100 pecans",
+        ready,
+        n,
+        message: gateMessage,
+        value: null,
+        ci95: null,
+        detail: null,
+      },
+    };
+    if (!hasMasks) {
+      cards.pecan_exposed_kernel_mean.message = "Needs segmentation masks";
+      cards.pecan_exposed_kernel_mean.ready = false;
+      cards.pecan_exposed_kernel_median.message = "Needs segmentation masks";
+      cards.pecan_exposed_kernel_median.ready = false;
+    } else if (ready && exposed.length) {
+      const mean = exposed.reduce((sum, value) => sum + value, 0) / exposed.length;
+      cards.pecan_exposed_kernel_mean.value = mean;
+      if (exposed.length >= 2) {
+        const variance = exposed.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (exposed.length - 1);
+        const half = 1.96 * Math.sqrt(variance / exposed.length);
+        cards.pecan_exposed_kernel_mean.ci95 = [mean - half, mean + half];
+      }
+      cards.pecan_exposed_kernel_mean.detail = exposed.length + " open pecans · N=" + n;
+      cards.pecan_exposed_kernel_median.value = median(exposed);
+      cards.pecan_exposed_kernel_median.detail = exposed.length + " open pecans · N=" + n;
+    } else if (ready) {
+      cards.pecan_exposed_kernel_mean.message = "No open pecans with kernel overlap";
+      cards.pecan_exposed_kernel_mean.ready = false;
+      cards.pecan_exposed_kernel_median.message = "No open pecans with kernel overlap";
+      cards.pecan_exposed_kernel_median.ready = false;
+    }
+    if (ready && areas.length && n > 0) {
+      const medianArea = median(areas);
+      if (medianArea > 0) {
+        const broken = Number(run.broken_kernel_area || 0);
+        cards.pecan_broken_kernel_area_per_100.value = 100 * (broken / medianArea) / n;
+        cards.pecan_broken_kernel_area_per_100.detail =
+          "broken area " + Math.round(broken) + "px · median pecan " + Math.round(medianArea) + "px · N=" + n;
+      } else {
+        cards.pecan_broken_kernel_area_per_100.message = "Median pecan area is zero";
+        cards.pecan_broken_kernel_area_per_100.ready = false;
+      }
+    } else if (ready) {
+      cards.pecan_broken_kernel_area_per_100.message = "No whole-pecan areas";
+      cards.pecan_broken_kernel_area_per_100.ready = false;
+    }
+    return cards;
+  }
+
+  function mergePecanSamples(frame) {
+    if (!frame) return;
+    pecanRun.whole_pecan_areas = pecanRun.whole_pecan_areas.concat(frame.whole_pecan_areas || []);
+    pecanRun.broken_kernel_area += Number(frame.broken_kernel_area || 0);
+    pecanRun.exposed_kernel_ratios = pecanRun.exposed_kernel_ratios.concat(frame.exposed_kernel_ratios || []);
+    pecanRun.n = pecanRun.whole_pecan_areas.length;
+    pecanRun.has_masks = pecanRun.has_masks || Boolean(frame.has_masks);
+  }
+
+  function formatBuiltinCard(card) {
+    if (!card.ready || card.value == null) {
+      return {
+        text: "—",
+        detail: card.message || "insufficient data",
+      };
+    }
+    const formatted = formatMetricValue(card.value);
+    let detail = card.detail || formatted.detail;
+    if (card.ci95) {
+      detail += " · 95% CI [" + formatMetricValue(card.ci95[0]).text + ", " + formatMetricValue(card.ci95[1]).text + "]";
+    }
+    return { text: formatted.text, detail };
+  }
+
+  function renderBuiltinCards(htmlParts) {
+    if (!pecanClassesReady()) return;
+    const cards = summarizePecanRun(pecanRun);
+    Object.keys(cards).forEach((id) => {
+      const card = cards[id];
+      const shown = formatBuiltinCard(card);
+      htmlParts.push(
+        "<article class=\"metric-card builtin\" data-builtin=\"" + escapeHtml(id) + "\">" +
+        "<div class=\"metric-card-head\">" +
+        "<div><p class=\"metric-card-name\">" + escapeHtml(card.name) +
+        "<span class=\"metric-badge\">built-in</span></p>" +
+        "<p class=\"metric-card-formula\">Edge-cut pecans excluded · N ≥ " + MIN_PECANS + "</p></div>" +
+        "</div>" +
+        "<dl class=\"metric-values\">" +
+        "<div class=\"metric-value\"><dt>This run</dt><dd>" + escapeHtml(shown.text) +
+        "<span class=\"metric-detail\">" + escapeHtml(shown.detail) + "</span></dd></div>" +
+        "<div class=\"metric-value\"><dt>Sample size</dt><dd>" + escapeHtml(String(card.n || 0)) +
+        "<span class=\"metric-detail\">whole pecans kept</span></dd></div>" +
+        "</dl></article>"
+      );
+    });
   }
 
   function renderMetrics() {
@@ -243,59 +402,69 @@
     metricsPanel.hidden = !show;
     if (!show) return;
 
-    setMeasureOptions();
-    ensureBuilderChips();
-
     if (!classNames().length) {
       metricsNote.textContent = "Save class names on the model before building a metric.";
+    } else if (pecanClassesReady()) {
+      metricsNote.textContent =
+        "Write a formula with count(Class) or area(Class). This class set also unlocks three built-in pecan KPIs that need per-pecan geometry.";
     } else {
       metricsNote.textContent =
-        "Build a ratio from class labels. Keep checking accumulates the chosen labels across frames, then divides those sums.";
+        "Write a formula with count(Class) or area(Class). Keep checking accumulates class totals across frames, then evaluates the formula on those sums.";
     }
 
-    if (!metrics.length) {
-      metricsList.innerHTML = "<p class=\"hint\">No metrics yet. Choose labels below and save one.</p>";
+    const parts = [];
+    renderBuiltinCards(parts);
+    metrics.forEach((metric) => {
+      const normalized = normalizeMetric(metric);
+      const stale = metricIsStale(normalized);
+      const formula = normalized.formula || "";
+      const frame = stale ? null : evaluateMetric(normalized, frameMeasurements);
+      const run = stale ? null : evaluateMetric(normalized, runFrames ? runSums : null);
+      const frameText = frame ? frame.text : "—";
+      const frameDetail = stale
+        ? "Labels missing from this model"
+        : (frame ? frame.detail : "Check a frame to fill this in");
+      const runText = run ? run.text : "—";
+      const runDetail = stale
+        ? "Labels missing from this model"
+        : (runFrames
+          ? runDetailWithFrames(run)
+          : "Start Keep checking to accumulate a run");
+      parts.push(
+        "<article class=\"metric-card" + (stale ? " stale" : "") + "\" data-id=\"" + escapeHtml(metric.id) + "\">" +
+        "<div class=\"metric-card-head\">" +
+        "<div><p class=\"metric-card-name\">" + escapeHtml(normalized.name) + "</p>" +
+        "<p class=\"metric-card-formula\">" + escapeHtml(formula) + "</p></div>" +
+        "<div class=\"metric-card-actions\">" +
+        "<button class=\"btn\" type=\"button\" data-action=\"edit\">Edit</button>" +
+        "<button class=\"btn\" type=\"button\" data-action=\"delete\">Delete</button>" +
+        "</div></div>" +
+        "<dl class=\"metric-values\">" +
+        "<div class=\"metric-value\"><dt>This frame</dt><dd>" + escapeHtml(frameText) +
+        "<span class=\"metric-detail\">" + escapeHtml(frameDetail) + "</span></dd></div>" +
+        "<div class=\"metric-value\"><dt>This run</dt><dd>" + escapeHtml(runText) +
+        "<span class=\"metric-detail\">" + escapeHtml(runDetail) + "</span></dd></div>" +
+        "</dl></article>"
+      );
+    });
+    if (!parts.length) {
+      metricsList.innerHTML = "<p class=\"hint\">No metrics yet. Enter a formula below and save one.</p>";
     } else {
-      metricsList.innerHTML = metrics.map((metric) => {
-        const stale = metricIsStale(metric);
-        const formula = formatFormula(metric.measure, metric.numerator || [], metric.denominator || []);
-        const frame = stale ? null : evaluateMetric(metric, frameMeasurements);
-        const run = stale ? null : evaluateMetric(metric, runFrames ? runSums : null);
-        const framePercent = frame ? frame.percent : "—";
-        const frameDetail = stale
-          ? "Labels missing from this model"
-          : (frame ? frame.detail : "Check a frame to fill this in");
-        const runPercent = run ? run.percent : "—";
-        const runDetail = stale
-          ? "Labels missing from this model"
-          : (runFrames
-            ? run.detail + " · " + runFrames + " frame" + (runFrames === 1 ? "" : "s")
-            : "Start Keep checking to accumulate a run");
-        return (
-          "<article class=\"metric-card" + (stale ? " stale" : "") + "\" data-id=\"" + escapeHtml(metric.id) + "\">" +
-          "<div class=\"metric-card-head\">" +
-          "<div><p class=\"metric-card-name\">" + escapeHtml(metric.name) + "</p>" +
-          "<p class=\"metric-card-formula\">" + escapeHtml(formula) + "</p></div>" +
-          "<div class=\"metric-card-actions\">" +
-          "<button class=\"btn\" type=\"button\" data-action=\"edit\">Edit</button>" +
-          "<button class=\"btn\" type=\"button\" data-action=\"delete\">Delete</button>" +
-          "</div></div>" +
-          "<dl class=\"metric-values\">" +
-          "<div class=\"metric-value\"><dt>This frame</dt><dd>" + escapeHtml(framePercent) +
-          "<span class=\"metric-detail\">" + escapeHtml(frameDetail) + "</span></dd></div>" +
-          "<div class=\"metric-value\"><dt>This run</dt><dd>" + escapeHtml(runPercent) +
-          "<span class=\"metric-detail\">" + escapeHtml(runDetail) + "</span></dd></div>" +
-          "</dl></article>"
-        );
-      }).join("");
+      metricsList.innerHTML = parts.join("");
     }
 
-    resetRunBtn.disabled = runFrames === 0 && !Object.keys(runSums).length;
+    resetRunBtn.disabled = runFrames === 0 && !Object.keys(runSums).length && !(pecanRun.n > 0);
+  }
+
+  function runDetailWithFrames(run) {
+    const base = run ? run.detail : "—";
+    return base + " · " + runFrames + " frame" + (runFrames === 1 ? "" : "s");
   }
 
   function resetRun() {
     runSums = {};
     runFrames = 0;
+    pecanRun = emptyPecanRun();
     renderMetrics();
   }
 
@@ -355,8 +524,9 @@
         const color = (model.class_colors || [])[index] || "#c4a35a";
         return "<li><span class=\"swatch\" style=\"background:" + color + "\"></span>" + escapeHtml(name) + "</li>";
       }).join("");
-      libraryEl.hidden = !model.library_error;
-      libraryEl.textContent = model.library_error || "";
+      const problems = [model.library_error, model.inspect_error].filter(Boolean);
+      libraryEl.hidden = !problems.length;
+      libraryEl.textContent = problems.join(" ");
       if (document.activeElement !== namesEl) {
         namesEl.value = (model.class_names || []).join(", ");
       }
@@ -375,8 +545,81 @@
       setMsg(model.error, "err");
     }
     syncActionButtons();
-    setMeasureOptions();
     renderMetrics();
+    renderModelList();
+  }
+
+  function modelDetail(row) {
+    const parts = [];
+    if (row.kind) parts.push(row.kind);
+    if (row.architecture && row.architecture !== row.kind) parts.push(row.architecture);
+    if (row.resolution) parts.push(row.resolution + " px");
+    const classCount = Array.isArray(row.class_names) && row.class_names.length
+      ? row.class_names.length
+      : row.num_classes;
+    if (classCount) parts.push(classCount + (Number(classCount) === 1 ? " class" : " classes"));
+    const size = formatBytes(row.bytes);
+    if (size) parts.push(size);
+    if (row.inspect_error) parts.push("Could not read this file");
+    return parts.join(" · ");
+  }
+
+  function renderModelList() {
+    if (!modelListEl) return;
+    const rows = (model && model.models) || [];
+    if (libraryHintEl && model && model.library_path) {
+      libraryHintEl.textContent = "Saved in " + model.library_path + ". Uploading the same file name replaces that model.";
+    }
+    if (modelListEmptyEl) modelListEmptyEl.hidden = rows.length > 0;
+    modelListEl.innerHTML = rows.map((row) => {
+      const detail = modelDetail(row);
+      return "<li><button type=\"button\" class=\"model-pick" + (row.active ? " active" : "") + "\" data-model-id=\"" + escapeHtml(row.id) + "\" aria-pressed=\"" + (row.active ? "true" : "false") + "\"" + (busy || selecting ? " disabled" : "") + "><span class=\"model-pick-name\">" + escapeHtml(row.filename || row.id) + "</span>" + (detail ? "<span class=\"model-pick-meta\">" + escapeHtml(detail) + "</span>" : "") + "</button></li>";
+    }).join("");
+  }
+
+  function clearResult() {
+    resultEl.hidden = true;
+    resultEl.removeAttribute("src");
+    emptyEl.hidden = false;
+    countsEl.innerHTML = "";
+    if (model && model.empty_label) emptyEl.textContent = model.empty_label;
+  }
+
+  async function selectModel(id) {
+    if (!id || selecting || busy) return;
+    if (model && model.active_id === id) return;
+    if (live) {
+      setLive(false);
+      if (runAbort) runAbort.abort();
+    }
+    selecting = true;
+    renderModelList();
+    syncActionButtons();
+    setMsg("Switching model…", "");
+    try {
+      const response = await fetch("/api/model/select", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: id }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || "Could not switch models.");
+      model = data;
+      overrideNames = false;
+      frameMeasurements = null;
+      resetRun();
+      resetBuilder();
+      clearResult();
+      renderStatus();
+      if (!model.error) setMsg("Now using " + (model.filename || "the selected model") + ".", "ok");
+    } catch (err) {
+      setMsg(err.message || String(err), "err");
+      renderModelList();
+    } finally {
+      selecting = false;
+      renderModelList();
+      syncActionButtons();
+    }
   }
 
   function modelReady() {
@@ -385,9 +628,10 @@
 
   function syncActionButtons() {
     const ready = modelReady();
-    checkBtn.disabled = busy || live || !ready;
-    startBtn.disabled = live || !ready;
+    checkBtn.disabled = busy || live || selecting || !ready;
+    startBtn.disabled = live || selecting || !ready;
     stopBtn.disabled = !live;
+    renderModelList();
   }
 
   function setLive(on) {
@@ -455,13 +699,16 @@
     const controller = new AbortController();
     runAbort = controller;
     try {
+      const payload = {
+        threshold: Number(thresholdEl.value),
+        speed: speedEl ? speedEl.value : "fast",
+      };
+      if (cameraRoi) payload.roi = cameraRoi;
+      else payload.roi = null;
       const response = await fetch("/api/model/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          threshold: Number(thresholdEl.value),
-          speed: speedEl ? speedEl.value : "fast",
-        }),
+        body: JSON.stringify(payload),
         signal: controller.signal,
       });
       const data = await response.json();
@@ -474,7 +721,10 @@
       }
       if (model) model.loaded = true;
       frameMeasurements = measurementsMap(data.measurements || []);
-      if (accumulate) addFrameToRun(data.measurements || []);
+      if (accumulate) {
+        addFrameToRun(data.measurements || []);
+        if (pecanClassesReady()) mergePecanSamples(data.pecan_samples);
+      }
       renderResult(data);
       renderMetrics();
       if (live) setMsg("Keep checking is running.", "ok");
@@ -490,6 +740,14 @@
       uploadBtn.disabled = false;
       syncActionButtons();
     }
+  }
+
+  if (modelListEl) {
+    modelListEl.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-model-id]");
+      if (!button || button.disabled) return;
+      selectModel(button.getAttribute("data-model-id"));
+    });
   }
 
   thresholdEl.addEventListener("input", () => {
@@ -517,8 +775,9 @@
       frameMeasurements = null;
       resetRun();
       resetBuilder();
-      setMsg("Model uploaded.", "ok");
+      clearResult();
       renderStatus();
+      if (!model.error) setMsg("Model saved on this kit.", "ok");
       await refreshMetrics();
     } catch (err) {
       setMsg(err.message || String(err), "err");
@@ -592,10 +851,40 @@
     resetRun();
   });
 
-  metricForm.addEventListener("change", (event) => {
-    if (event.target && (event.target.name === "metric-measure" || event.target.type === "checkbox")) {
-      updateFormulaPreview();
+  metricFormulaInput.addEventListener("input", () => {
+    updateFormulaPreview();
+    renderSuggest();
+  });
+  metricFormulaInput.addEventListener("keydown", (event) => {
+    if (metricFormulaSuggest.hidden) return;
+    const buttons = Array.from(metricFormulaSuggest.querySelectorAll("button"));
+    if (!buttons.length) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      suggestIndex = (suggestIndex + 1) % buttons.length;
+      renderSuggest();
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      suggestIndex = (suggestIndex - 1 + buttons.length) % buttons.length;
+      renderSuggest();
+    } else if (event.key === "Enter" || event.key === "Tab") {
+      const active = buttons[suggestIndex] || buttons[0];
+      if (active) {
+        event.preventDefault();
+        insertSuggestion(active.getAttribute("data-name"));
+      }
+    } else if (event.key === "Escape") {
+      hideSuggest();
     }
+  });
+  metricFormulaInput.addEventListener("blur", () => {
+    setTimeout(hideSuggest, 120);
+  });
+  metricFormulaSuggest.addEventListener("mousedown", (event) => {
+    const button = event.target.closest("button[data-name]");
+    if (!button) return;
+    event.preventDefault();
+    insertSuggestion(button.getAttribute("data-name"));
   });
 
   metricCancelBtn.addEventListener("click", () => {
@@ -605,15 +894,24 @@
   metricForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const name = metricNameEl.value.trim();
-    const measure = selectedMeasure();
-    const numerator = selectedLabels(metricNumEl);
-    const denominator = selectedLabels(metricDenEl);
+    const formula = metricFormulaInput.value.trim();
     if (!name) {
       setMsg("Give the metric a name.", "err");
       return;
     }
-    if (!numerator.length || !denominator.length) {
-      setMsg("Choose at least one numerator and one denominator label.", "err");
+    if (!formula) {
+      setMsg("Enter a formula.", "err");
+      return;
+    }
+    try {
+      window.MetricFormula.evaluateFormula(formula, {});
+    } catch (err) {
+      setMsg(err.message || String(err), "err");
+      return;
+    }
+    const unknown = window.MetricFormula.formulaLabels(formula).filter((label) => !classNames().includes(label));
+    if (unknown.length) {
+      setMsg("Unknown class: " + unknown.join(", "), "err");
       return;
     }
     if (metrics.length >= 8 && !editingId) {
@@ -623,9 +921,7 @@
     const entry = {
       id: editingId || undefined,
       name,
-      measure,
-      numerator,
-      denominator,
+      formula,
     };
     const next = editingId
       ? metrics.map((metric) => (metric.id === editingId ? { ...metric, ...entry, id: editingId } : metric))
@@ -665,7 +961,85 @@
     }
   });
 
-  Promise.all([refreshStatus(), refreshMetrics()]).catch((err) => {
+  function setRoiStatus(roi) {
+    if (!roiStatusEl) return;
+    if (!roi) {
+      roiStatusEl.textContent = "Using the full frame.";
+      roiStatusEl.className = "msg";
+      return;
+    }
+    roiStatusEl.textContent =
+      "Region " + roi.w + "×" + roi.h + " at (" + roi.x + ", " + roi.y + ").";
+    roiStatusEl.className = "msg ok";
+  }
+
+  async function persistRoi(roi) {
+    const response = await fetch("/api/model/roi", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roi: roi }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "Could not save the region.");
+    cameraRoi = data.roi || roi;
+    setRoiStatus(cameraRoi);
+    if (roiDrawer) roiDrawer.setRoi(cameraRoi);
+  }
+
+  async function clearPersistedRoi() {
+    const response = await fetch("/api/model/roi", { method: "DELETE" });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "Could not clear the region.");
+    cameraRoi = null;
+    setRoiStatus(null);
+    if (roiDrawer) roiDrawer.clear();
+  }
+
+  async function refreshRoi() {
+    const response = await fetch("/api/model/roi");
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "Could not load the region.");
+    cameraRoi = data.roi || null;
+    setRoiStatus(cameraRoi);
+    if (roiDrawer) roiDrawer.setRoi(cameraRoi);
+  }
+
+  if (cameraWrap && cameraPreview && window.RoiDrawer) {
+    roiDrawer = new window.RoiDrawer({
+      wrap: cameraWrap,
+      img: cameraPreview,
+      onCommit: (roi) => {
+        persistRoi(roi).catch((err) => setMsg(err.message || String(err), "err"));
+      },
+      onClear: () => {
+        cameraRoi = null;
+        setRoiStatus(null);
+      },
+    });
+    cameraPreview.addEventListener("load", () => {
+      if (roiDrawer) roiDrawer.refresh();
+    });
+    window.addEventListener("resize", () => {
+      if (roiDrawer) roiDrawer.refresh();
+    });
+  }
+
+  if (roiRedrawBtn) {
+    roiRedrawBtn.addEventListener("click", () => {
+      if (roiDrawer) roiDrawer.redraw();
+      setMsg("Drag on the live camera to draw a new region.", "");
+    });
+  }
+
+  if (roiClearBtn) {
+    roiClearBtn.addEventListener("click", () => {
+      clearPersistedRoi()
+        .then(() => setMsg("Region cleared. Using the full frame.", "ok"))
+        .catch((err) => setMsg(err.message || String(err), "err"));
+    });
+  }
+
+  Promise.all([refreshStatus(), refreshMetrics(), refreshRoi()]).catch((err) => {
     statusEl.textContent = err.message || String(err);
     statusEl.className = "msg err";
   });

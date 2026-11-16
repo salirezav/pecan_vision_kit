@@ -8,19 +8,22 @@
 </head>
 <body>
   <header class="top">
-    <div class="brand">
-      <span class="brand-mark">Pecan Vision</span>
-      <span class="kit">Kit {{ kit_id|default('??') }}</span>
+    <div class="top-bar">
+      <div class="brand">
+        <span class="brand-mark">Pecan Vision</span>
+        <span class="kit">Kit {{ kit_id|default('??') }}</span>
+      </div>
+      <nav>
+        <a href="{{ url_for('ui.index') }}">Record</a>
+        <a href="{{ url_for('ui.model_page') }}">Model</a>
+        <a href="{{ url_for('ui.deploy_page') }}">Deploy</a>
+        <a href="{{ url_for('ui.review_page') }}">Review</a>
+        <a href="{{ url_for('ui.videos_page') }}">Videos</a>
+        <a href="{{ url_for('ui.settings_page') }}">Settings</a>
+        <a href="{{ url_for('ui.admin_page') }}">Admin</a>
+      </nav>
     </div>
     <div id="activity-slot" class="activity-slot" aria-label="Active jobs"></div>
-    <nav>
-      <a href="{{ url_for('ui.index') }}">Record</a>
-      <a href="{{ url_for('ui.model_page') }}">Model</a>
-      <a href="{{ url_for('ui.deploy_page') }}">Deploy</a>
-      <a href="{{ url_for('ui.videos_page') }}">Videos</a>
-      <a href="{{ url_for('ui.settings_page') }}">Settings</a>
-      <a href="{{ url_for('ui.admin_page') }}">Admin</a>
-    </nav>
   </header>
   <main>
     {% block content %}{% endblock %}

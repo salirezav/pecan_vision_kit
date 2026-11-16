@@ -15,6 +15,7 @@ from typing import Any
 import cv2
 import numpy as np
 
+from pecan_kpis import collect_frame_samples, empty_frame_samples, pecan_classes_ready
 from segment_draw import (
     _build_measurements,
     _classify_result,
@@ -22,14 +23,26 @@ from segment_draw import (
     _draw_semantic,
     _draw_ultralytics_instances,
     _as_numpy,
+    draw_detection_label,
+    draw_inspection_polygons,
+    draw_roi_rectangle,
+    overlay_thickness,
 )
 from segment_inspect import (
     SPEED_SIZES,
     _COLORS,
     _TASKS,
+    infer_frame_max_side,
     inspect_checkpoint,
     parse_class_names,
     yolo_infer_size,
+)
+from yield_measure import (
+    MODEL_SIZE,
+    MIN_AREA_PX,
+    class_ids_for,
+    clip_roi_to_frame,
+    scale_roi_to_frame,
 )
 
 # Keep large model caches on the NVMe, not the SD card.
@@ -150,7 +163,8 @@ def _run_ultralytics(
     task: str,
     *,
     draw: bool = True,
-) -> tuple[np.ndarray, list[dict[str, Any]], dict[str, int]]:
+    reference_side: int | None = None,
+) -> tuple[np.ndarray, list[dict[str, Any]], dict[str, int], list[dict[str, Any]]]:
     kwargs: dict[str, Any] = {
         "imgsz": int(infer_size),
         "device": "cpu",
@@ -168,19 +182,27 @@ def _run_ultralytics(
     if result is None:
         raise RuntimeError("The model did not return a result.")
     if task == "classify":
-        annotated, items = _classify_result(result, bgr, labels)
-        return annotated, items, {}
+        annotated, items = _classify_result(result, bgr, labels, reference_side)
+        return annotated, items, {}, []
     if task == "semantic":
         semantic = getattr(result, "semantic_mask", None)
         if semantic is None or getattr(semantic, "data", None) is None:
-            return (bgr.copy() if draw else bgr), [], {}
-        return _draw_semantic(bgr, _as_numpy(semantic.data), labels)
+            return (bgr.copy() if draw else bgr), [], {}, []
+        annotated, items, class_areas = _draw_semantic(bgr, _as_numpy(semantic.data), labels)
+        return annotated, items, class_areas, []
     if task == "depth":
         depth = getattr(result, "depth", None)
         if depth is None or getattr(depth, "data", None) is None:
-            return (bgr.copy() if draw else bgr), [], {}
-        return _colorize_depth(bgr, _as_numpy(depth.data)), [], {}
-    return _draw_ultralytics_instances(result, bgr, labels, task, draw=draw)
+            return (bgr.copy() if draw else bgr), [], {}, []
+        return _colorize_depth(bgr, _as_numpy(depth.data)), [], {}, []
+    return _draw_ultralytics_instances(
+        result,
+        bgr,
+        labels,
+        task,
+        draw=draw,
+        reference_side=reference_side,
+    )
 
 
 def _run_model(
@@ -191,7 +213,8 @@ def _run_model(
     infer_size: int | None = None,
     *,
     draw: bool = True,
-) -> tuple[np.ndarray, list[dict[str, Any]], dict[str, int]]:
+    reference_side: int | None = None,
+) -> tuple[np.ndarray, list[dict[str, Any]], dict[str, int], list[dict[str, Any]]]:
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
     predict_kwargs: dict[str, Any] = {
         "threshold": threshold,
@@ -204,8 +227,9 @@ def _run_model(
         detections = detections[0] if detections else None
     annotated = bgr.copy() if draw else bgr
     items: list[dict[str, Any]] = []
+    instances: list[dict[str, Any]] = []
     if detections is None or getattr(detections, "xyxy", None) is None or len(detections) == 0:
-        return annotated, items, {}
+        return annotated, items, {}, instances
 
     class_ids = np.asarray(detections.class_id)
     confidences = np.asarray(detections.confidence)
@@ -216,6 +240,7 @@ def _run_model(
     overlay = annotated.copy() if draw else None
     drew_mask = False
     union_masks: dict[str, np.ndarray] = {}
+    mask_by_index: dict[int, np.ndarray] = {}
     if masks is not None:
         mask_list = np.asarray(masks)
         for index in keep:
@@ -232,6 +257,7 @@ def _run_model(
                     interpolation=cv2.INTER_NEAREST,
                 )
             region_bool = region.astype(bool)
+            mask_by_index[index] = region_bool
             name = labels[class_id] if 0 <= class_id < len(labels) else f"Class {class_id + 1}"
             if name not in union_masks:
                 union_masks[name] = np.zeros(bgr.shape[:2], dtype=bool)
@@ -250,25 +276,36 @@ def _run_model(
             name = labels[class_id]
         else:
             name = f"Class {class_id + 1}"
+        x1, y1, x2, y2 = (float(v) for v in boxes[index][:4])
+        instance: dict[str, Any] = {
+            "class": name,
+            "box": (x1, y1, x2, y2),
+            "confidence": confidence,
+        }
+        if index in mask_by_index:
+            instance["mask"] = mask_by_index[index]
+            instance["area"] = float(mask_by_index[index].sum())
+        instances.append(instance)
         if draw:
             color = _COLORS[class_id % len(_COLORS)]
-            x1, y1, x2, y2 = (int(round(v)) for v in boxes[index][:4])
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
-            caption = f"{name} {confidence:.0%}"
-            cv2.putText(
+            cv2.rectangle(
                 annotated,
-                caption,
-                (x1, max(20, y1 - 6)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
+                (int(round(x1)), int(round(y1))),
+                (int(round(x2)), int(round(y2))),
                 color,
-                2,
-                cv2.LINE_AA,
+                overlay_thickness(annotated, reference_side),
+            )
+            draw_detection_label(
+                annotated,
+                f"{name} {confidence:.0%}",
+                (int(round(x1)), int(round(y1))),
+                color,
+                reference_side,
             )
         items.append({"class": name, "confidence": round(confidence, 3)})
     items.sort(key=lambda item: item["confidence"], reverse=True)
     class_areas = {name: int(mask.sum()) for name, mask in union_masks.items()}
-    return annotated, items, class_areas
+    return annotated, items, class_areas, instances
 
 def predict_frame(
     model: Any,
@@ -278,6 +315,8 @@ def predict_frame(
     speed: str = "fast",
     *,
     draw: bool = True,
+    roi: dict[str, Any] | None = None,
+    roi_space: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     frame = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_COLOR)
     if frame is None:
@@ -300,29 +339,98 @@ def predict_frame(
             setattr(model, "_pecan_labels", list(labels))
         except Exception:  # noqa: BLE001
             pass
+
+    height, width = frame.shape[:2]
+    # Strokes were tuned on the native frame. Scale them up when the painted
+    # bitmap is larger. A crop is pasted back 1:1, so its reference shrinks
+    # with the crop and the labels keep the full-frame weight.
+    native_side = infer_frame_max_side(meta, "accurate")
+    clipped: dict[str, int] | None = None
+    work = frame
+    if roi:
+        mapped = {
+            "x": int(roi.get("x", 0)),
+            "y": int(roi.get("y", 0)),
+            "w": int(roi.get("w", 0)),
+            "h": int(roi.get("h", 0)),
+        }
+        # ROI is stored in full camera pixels; infer JPEGs are often downscaled.
+        if isinstance(roi_space, dict):
+            src_w = int(roi_space.get("width") or 0)
+            src_h = int(roi_space.get("height") or 0)
+            if src_w > 0 and src_h > 0 and (src_w != width or src_h != height):
+                mapped = scale_roi_to_frame(mapped, src_w, src_h, width, height)
+        clipped = clip_roi_to_frame(mapped, width, height)
+        if clipped is None:
+            raise RuntimeError("The region of interest does not fit this frame.")
+        x1 = clipped["x"]
+        y1 = clipped["y"]
+        x2 = x1 + clipped["w"]
+        y2 = y1 + clipped["h"]
+        work = frame[y1:y2, x1:x2]
+
+    full_long = max(height, width, 1)
+    work_long = max(int(work.shape[0]), int(work.shape[1]), 1)
+    reference_side = max(1, int(round(native_side * work_long / float(full_long))))
+
+    instances: list[dict[str, Any]] = []
     if family == "hailo":
         from hailo_runtime import run_hailo  # noqa: PLC0415
 
-        annotated, items, class_areas = run_hailo(
-            model, frame, threshold, labels, task, draw=draw
+        annotated, items, class_areas, instances = run_hailo(
+            model,
+            work,
+            threshold,
+            labels,
+            task,
+            draw=draw,
+            reference_side=reference_side,
         )
     elif family == "ultralytics":
         infer_size = yolo_infer_size(int(meta.get("resolution") or 640), speed_key)
-        annotated, items, class_areas = _run_ultralytics(
-            model, frame, threshold, labels, infer_size, task, draw=draw
+        annotated, items, class_areas, instances = _run_ultralytics(
+            model,
+            work,
+            threshold,
+            labels,
+            infer_size,
+            task,
+            draw=draw,
+            reference_side=reference_side,
         )
     else:
-        annotated, items, class_areas = _run_model(
+        annotated, items, class_areas, instances = _run_model(
             model,
-            frame,
+            work,
             threshold,
             labels,
             infer_size=SPEED_SIZES[speed_key],
             draw=draw,
+            reference_side=reference_side,
         )
+
     image = None
     if draw:
-        ok, buf = cv2.imencode(".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+        if clipped is not None:
+            composed = frame.copy()
+            x1 = clipped["x"]
+            y1 = clipped["y"]
+            x2 = x1 + clipped["w"]
+            y2 = y1 + clipped["h"]
+            if annotated.shape[0] == clipped["h"] and annotated.shape[1] == clipped["w"]:
+                composed[y1:y2, x1:x2] = annotated
+            else:
+                resized = cv2.resize(
+                    annotated,
+                    (clipped["w"], clipped["h"]),
+                    interpolation=cv2.INTER_LINEAR,
+                )
+                composed[y1:y2, x1:x2] = resized
+            draw_roi_rectangle(composed, clipped, native_side)
+            out = composed
+        else:
+            out = annotated
+        ok, buf = cv2.imencode(".jpg", out, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
         if not ok:
             raise RuntimeError("Could not encode the result image.")
         image = "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode("ascii")
@@ -335,7 +443,34 @@ def predict_frame(
         for item in items:
             counts[item["class"]] = counts.get(item["class"], 0) + 1
     measurements = _build_measurements(labels, counts, class_areas, result_mode)
-    return {
+    pecan_samples = empty_frame_samples()
+    if pecan_classes_ready(labels) and instances:
+        if clipped is not None:
+            bounds = (
+                0,
+                0,
+                int(clipped["w"]),
+                int(clipped["h"]),
+            )
+            sample_shape = (int(work.shape[0]), int(work.shape[1]))
+        else:
+            bounds = (0, 0, width, height)
+            sample_shape = (height, width)
+        pecan_samples = collect_frame_samples(
+            shape=sample_shape,
+            bounds=bounds,
+            instances=instances,
+        )
+        pecan_samples = {
+            "whole_pecan_areas": [float(v) for v in pecan_samples.get("whole_pecan_areas") or []],
+            "broken_kernel_area": float(pecan_samples.get("broken_kernel_area") or 0),
+            "exposed_kernel_ratios": [
+                float(v) for v in pecan_samples.get("exposed_kernel_ratios") or []
+            ],
+            "n": int(pecan_samples.get("n") or 0),
+            "has_masks": bool(pecan_samples.get("has_masks")),
+        }
+    payload: dict[str, Any] = {
         "ok": True,
         "elapsed_ms": elapsed_ms,
         "threshold": threshold,
@@ -350,9 +485,167 @@ def predict_frame(
         "match": match if result_mode == "scores" else None,
         "total": len(items) if result_mode == "counts" else (1 if match else 0),
         "image": image,
+        "pecan_samples": pecan_samples,
     }
+    if clipped is not None:
+        payload["roi"] = clipped
+    return payload
 
 
 def load_model(path: Path, meta: dict[str, Any]) -> Any:
     return _load_model(path, meta)
+
+
+def predict_roi_frame(
+    model: Any,
+    jpeg: bytes,
+    meta: dict[str, Any],
+    *,
+    roi: dict[str, int],
+    thresholds: dict[str, float],
+    min_area_px: float = MIN_AREA_PX,
+    model_size: int = MODEL_SIZE,
+    draw: bool = True,
+) -> dict[str, Any]:
+    """Crop ROI, run YOLO at fixed size, return model-space half/piece areas."""
+    frame = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if frame is None:
+        raise RuntimeError("Could not read the video frame.")
+    started = time.perf_counter()
+    family = str(meta.get("family") or "ultralytics")
+    if family != "ultralytics":
+        raise RuntimeError("Half-yield review needs a YOLO segmentation model.")
+    task = str(meta.get("task") or "segment")
+    if task not in {"segment", "semantic"}:
+        raise RuntimeError("Half-yield review needs a segmentation model.")
+
+    cached = getattr(model, "_pecan_labels", None)
+    labels = list(cached) if isinstance(cached, (list, tuple)) else None
+    if labels is None:
+        labels = parse_class_names(
+            ",".join(str(name) for name in (meta.get("class_names") or [])),
+            int(meta.get("num_classes") or 0),
+            family,
+        )
+        apply_labels(model, labels)
+        try:
+            setattr(model, "_pecan_labels", list(labels))
+        except Exception:  # noqa: BLE001
+            pass
+
+    height, width = frame.shape[:2]
+    clipped = clip_roi_to_frame(roi, width, height)
+    if clipped is None:
+        raise RuntimeError("The measurement region does not fit this frame.")
+
+    x1 = clipped["x"]
+    y1 = clipped["y"]
+    x2 = x1 + clipped["w"]
+    y2 = y1 + clipped["h"]
+    crop = frame[y1:y2, x1:x2]
+    resized = cv2.resize(crop, (int(model_size), int(model_size)), interpolation=cv2.INTER_LINEAR)
+
+    class_thresh = {
+        "half": float(thresholds.get("half", 0.30)),
+        "piece": float(thresholds.get("piece", 0.30)),
+        "obscured": float(thresholds.get("obscured", 0.30)),
+        "shell": float(thresholds.get("shell", 0.30)),
+    }
+    base_conf = min(class_thresh.values())
+    results = model.predict(
+        resized,
+        imgsz=int(model_size),
+        device="cpu",
+        verbose=False,
+        stream=False,
+        conf=float(base_conf),
+    )
+    result = results[0] if isinstance(results, list) and results else results
+    if result is None:
+        raise RuntimeError("The model did not return a result.")
+
+    ids = class_ids_for(labels)
+    half_ids = ids["half"]
+    piece_ids = ids["piece"]
+    obscured_ids = ids["obscured"]
+    shell_ids = ids["shell"]
+
+    polygons: list[tuple[np.ndarray, int]] = []
+    half_area_sum = 0.0
+    piece_area_sum = 0.0
+    items: list[dict[str, Any]] = []
+
+    has_masks = getattr(result, "masks", None) is not None and getattr(result.masks, "xy", None) is not None
+    has_boxes = getattr(result, "boxes", None) is not None
+    if has_masks and has_boxes and len(result.masks.xy) and len(result.boxes.cls):
+        classes = _as_numpy(result.boxes.cls).astype(int).reshape(-1)
+        confs = _as_numpy(result.boxes.conf).astype(float).reshape(-1)
+        thresh = np.full_like(confs, float(base_conf), dtype=float)
+        if half_ids:
+            thresh[np.isin(classes, list(half_ids))] = class_thresh["half"]
+        if piece_ids:
+            thresh[np.isin(classes, list(piece_ids))] = class_thresh["piece"]
+        if obscured_ids:
+            thresh[np.isin(classes, list(obscured_ids))] = class_thresh["obscured"]
+        if shell_ids:
+            thresh[np.isin(classes, list(shell_ids))] = class_thresh["shell"]
+        keep = np.where(confs >= thresh)[0]
+        sx = clipped["w"] / float(model_size)
+        sy = clipped["h"] / float(model_size)
+        for index in keep:
+            seg_xy = result.masks.xy[int(index)]
+            if seg_xy is None or len(seg_xy) == 0:
+                continue
+            try:
+                mask = result.masks.data[int(index)]
+                area_i = float((mask > 0.5).sum().item())
+            except Exception:  # noqa: BLE001
+                contour = np.asarray(seg_xy, np.float32).reshape(-1, 1, 2)
+                area_i = float(abs(cv2.contourArea(contour)))
+            class_id = int(classes[int(index)])
+            confidence = float(confs[int(index)])
+            if area_i >= float(min_area_px):
+                if class_id in half_ids:
+                    half_area_sum += area_i
+                if class_id in piece_ids:
+                    piece_area_sum += area_i
+            mapped = np.asarray(seg_xy, dtype=np.float32).copy()
+            mapped[:, 0] = mapped[:, 0] * sx + x1
+            mapped[:, 1] = mapped[:, 1] * sy + y1
+            polygons.append((mapped, class_id))
+            name = labels[class_id] if 0 <= class_id < len(labels) else f"Class {class_id + 1}"
+            items.append(
+                {
+                    "class": name,
+                    "confidence": round(confidence, 3),
+                    "area": round(area_i, 1),
+                }
+            )
+
+    annotated = frame.copy() if draw else frame
+    if draw:
+        draw_roi_rectangle(annotated, clipped)
+        id_to_name = {index: name for index, name in enumerate(labels)}
+        draw_inspection_polygons(annotated, polygons, id_to_name)
+
+    image = None
+    if draw:
+        ok, buf = cv2.imencode(".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+        if not ok:
+            raise RuntimeError("Could not encode the result image.")
+        image = "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode("ascii")
+
+    elapsed_ms = int((time.perf_counter() - started) * 1000)
+    items.sort(key=lambda item: item["confidence"], reverse=True)
+    return {
+        "ok": True,
+        "elapsed_ms": elapsed_ms,
+        "half_area": float(half_area_sum),
+        "piece_area": float(piece_area_sum),
+        "roi": clipped,
+        "items": items[:40],
+        "image": image,
+        "task": task,
+        "result_mode": "counts",
+    }
 

@@ -8,7 +8,7 @@ from typing import Any
 import cv2
 import numpy as np
 
-from segment_draw import _COLORS
+from segment_draw import _COLORS, draw_detection_label, overlay_thickness
 
 
 class HailoModel:
@@ -324,7 +324,8 @@ def run_hailo(
     task: str,
     *,
     draw: bool = True,
-) -> tuple[np.ndarray, list[dict[str, Any]], dict[str, int]]:
+    reference_side: int | None = None,
+) -> tuple[np.ndarray, list[dict[str, Any]], dict[str, int], list[dict[str, Any]]]:
     letterboxed, scale, pad_x, pad_y = _letterbox(bgr, model.input_w, model.input_h)
     rgb = cv2.cvtColor(letterboxed, cv2.COLOR_BGR2RGB)
     outputs = model.infer(rgb)
@@ -368,20 +369,31 @@ def run_hailo(
             "Use a YOLO HEF with on-chip NMS (detect) or yolov5-seg raw heads."
         )
 
+    instances: list[dict[str, Any]] = []
+    for class_id, x1, y1, x2, y2, score in boxes:
+        name = labels[class_id] if 0 <= class_id < len(labels) else f"Class {class_id + 1}"
+        area = float(max(0, (x2 - x1) * (y2 - y1)))
+        instances.append(
+            {
+                "class": name,
+                "box": (float(x1), float(y1), float(x2), float(y2)),
+                "area": area,
+                "confidence": float(score),
+            }
+        )
+
     annotated = bgr.copy() if draw else bgr
     if draw:
+        thickness = overlay_thickness(annotated, reference_side)
         for class_id, x1, y1, x2, y2, score in boxes:
             color = _COLORS[class_id % len(_COLORS)]
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, thickness)
             name = labels[class_id] if 0 <= class_id < len(labels) else f"Class {class_id + 1}"
-            cv2.putText(
+            draw_detection_label(
                 annotated,
                 f"{name} {score:.0%}",
-                (x1, max(20, y1 - 6)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
+                (x1, y1),
                 color,
-                2,
-                cv2.LINE_AA,
+                reference_side,
             )
-    return annotated, items, class_areas
+    return annotated, items, class_areas, instances

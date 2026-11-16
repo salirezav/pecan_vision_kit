@@ -542,7 +542,11 @@ SPEED_SIZES = {
 
 
 def infer_frame_max_side(meta: dict[str, Any] | None, speed: str = "fast") -> int:
-    """Longest side to keep when downscaling a camera frame for inference IPC."""
+    """Longest side of the network input for this speed preset.
+
+    This is not the size of the painted result. Fast and balanced stay small
+    here; the JPEG the boxes are drawn on uses display_frame_max_side.
+    """
     info = meta if isinstance(meta, dict) else {}
     speed_key = speed if speed in SPEED_SIZES else "fast"
     family = str(info.get("family") or "rfdetr")
@@ -553,6 +557,22 @@ def infer_frame_max_side(meta: dict[str, Any] | None, speed: str = "fast") -> in
     if size is None:
         return int(info.get("resolution") or 640)
     return int(size)
+
+
+# Ceiling for the frame boxes and labels are painted on. The camera image is
+# never upscaled to reach it. 1280 matches the kit's usual preview size, which
+# stays sharp in the result panel without shipping a 1920 frame to the worker.
+DISPLAY_MAX_SIDE = 1280
+
+
+def display_frame_max_side(meta: dict[str, Any] | None = None) -> int:
+    """Longest side to keep when encoding the frame overlays are drawn on.
+
+    Independent of the speed preset. At least the model's native size, so
+    Accurate does not get a smaller canvas than it already had.
+    """
+    native = infer_frame_max_side(meta, "accurate")
+    return max(int(native), DISPLAY_MAX_SIDE)
 
 
 def library_error(family: str | None = None) -> str | None:

@@ -94,6 +94,7 @@ def api_activity():
             "ok": True,
             "recording": recording,
             "deploy_live": bool(rt.deploy_live.status().get("running")),
+            "review_live": rt.review_live.is_running(),
         }
     )
 

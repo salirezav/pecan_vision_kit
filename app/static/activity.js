@@ -19,6 +19,9 @@
     if (state.deploy_live) {
       slot.appendChild(chip("/deploy", "Live inference", "live"));
     }
+    if (state.review_live) {
+      slot.appendChild(chip("/review", "Review", "review"));
+    }
   }
 
   async function refresh() {

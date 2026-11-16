@@ -13,8 +13,9 @@ import yaml
 
 from camera import FPS_CHOICES, RESOLUTIONS, CameraService, find_camera_device
 from deploy_live import DeployLiveService
+from review_live import ReviewLiveService
 from segment import ModelBusy, ModelService
-from segment_inspect import infer_frame_max_side
+from segment_inspect import display_frame_max_side
 from storage import ensure_allowed_dir, list_videos
 from update import read_version, version_label
 
@@ -34,18 +35,65 @@ models = ModelService(
 
 
 def capture_infer_jpeg(speed: str = "fast") -> bytes | None:
+    """Latest frame for a prediction, sized for drawing rather than the network.
+
+    `speed` is the network preset and is applied later, inside the worker.
+    The bitmap stays at display size so fast and balanced boxes are not
+    painted on a tiny image and then stretched in the browser.
+    """
+    del speed
     meta = models.infer_meta()
-    max_side = infer_frame_max_side(meta, speed)
+    max_side = display_frame_max_side(meta)
     return require_cam().get_infer_jpeg(max_side=max_side)
+
+
+def camera_frame_size() -> tuple[int | None, int | None]:
+    try:
+        status = require_cam().status()
+    except Exception:  # noqa: BLE001
+        return None, None
+    width = int(status.get("width") or 0) or None
+    height = int(status.get("height") or 0) or None
+    return width, height
 
 
 deploy_live = DeployLiveService(
     get_jpeg=capture_infer_jpeg,
-    predict=lambda jpeg, threshold, speed, draw=False: models.predict_jpeg(
-        jpeg, threshold, speed=speed, draw=draw
+    predict=lambda jpeg, threshold, speed, draw=True, roi=None, roi_space=None: models.predict_jpeg(
+        jpeg, threshold, speed=speed, draw=draw, roi=roi, roi_space=roi_space
     ),
     list_metrics=lambda: models.list_metrics(),
     model_busy=ModelBusy,
+    model_status=lambda: models.status(),
+    get_frame_size=camera_frame_size,
+)
+
+
+def _review_video_rows() -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in list_videos(current_save_dir(), limit=100):
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name") or "")
+        path = current_save_dir() / name
+        if not path.is_file():
+            continue
+        rows.append(
+            {
+                "name": name,
+                "path": str(path),
+                "size_mb": row.get("size_mb"),
+                "mtime": row.get("mtime"),
+            }
+        )
+    return rows
+
+
+review_live = ReviewLiveService(
+    predict_roi=lambda jpeg, **kwargs: models.predict_roi_jpeg(jpeg, **kwargs),
+    halfyield_status=lambda: models.halfyield_status(),
+    model_busy=ModelBusy,
+    list_videos=_review_video_rows,
 )
 
 

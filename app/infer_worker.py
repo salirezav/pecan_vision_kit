@@ -15,7 +15,7 @@ from typing import Any
 def worker_main(request_q: Any, response_q: Any) -> None:
     """Spawn entry point. Imports segment_runtime only after the process starts."""
     # Delay heavy imports until we are in the child process.
-    from segment_runtime import load_model, predict_frame  # noqa: PLC0415
+    from segment_runtime import load_model, predict_frame, predict_roi_frame  # noqa: PLC0415
 
     model = None
     loaded_path: str | None = None
@@ -26,7 +26,8 @@ def worker_main(request_q: Any, response_q: Any) -> None:
         job = request_q.get()
         if job is None or job.get("cmd") == "stop":
             break
-        if job.get("cmd") != "predict":
+        cmd = str(job.get("cmd") or "")
+        if cmd not in {"predict", "predict_roi"}:
             response_q.put({"ok": False, "error": "Unknown inference command."})
             continue
         try:
@@ -58,14 +59,29 @@ def worker_main(request_q: Any, response_q: Any) -> None:
                 loaded_path = str(weights)
                 loaded_mtime = mtime
                 loaded_meta_sig = meta_sig
-            result = predict_frame(
-                model,
-                job["jpeg"],
-                meta,
-                float(job.get("threshold", 0.5)),
-                speed=str(job.get("speed") or "fast"),
-                draw=bool(job.get("draw", True)),
-            )
+            if cmd == "predict_roi":
+                result = predict_roi_frame(
+                    model,
+                    job["jpeg"],
+                    meta,
+                    roi=dict(job.get("roi") or {}),
+                    thresholds=dict(job.get("thresholds") or {}),
+                    min_area_px=float(job.get("min_area_px", 30.0)),
+                    draw=bool(job.get("draw", True)),
+                )
+            else:
+                raw_roi = job.get("roi")
+                raw_space = job.get("roi_space")
+                result = predict_frame(
+                    model,
+                    job["jpeg"],
+                    meta,
+                    float(job.get("threshold", 0.5)),
+                    speed=str(job.get("speed") or "fast"),
+                    draw=bool(job.get("draw", True)),
+                    roi=dict(raw_roi) if isinstance(raw_roi, dict) else None,
+                    roi_space=dict(raw_space) if isinstance(raw_space, dict) else None,
+                )
             response_q.put(result)
         except Exception as exc:  # noqa: BLE001
             response_q.put({"ok": False, "error": str(exc)})
@@ -129,7 +145,52 @@ class InferClient:
         speed: str,
         recording: bool,
         draw: bool = True,
+        roi: dict[str, Any] | None = None,
+        roi_space: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        job: dict[str, Any] = {
+            "cmd": "predict",
+            "jpeg": jpeg,
+            "weights_path": str(weights_path),
+            "meta": meta,
+            "threshold": threshold,
+            "speed": speed,
+            "recording": recording,
+            "draw": bool(draw),
+        }
+        if roi is not None:
+            job["roi"] = dict(roi)
+        if roi_space is not None:
+            job["roi_space"] = dict(roi_space)
+        return self._submit(job)
+
+    def predict_roi(
+        self,
+        jpeg: bytes,
+        *,
+        weights_path: Path,
+        meta: dict[str, Any],
+        roi: dict[str, Any],
+        thresholds: dict[str, float],
+        recording: bool,
+        min_area_px: float = 30.0,
+        draw: bool = True,
+    ) -> dict[str, Any]:
+        return self._submit(
+            {
+                "cmd": "predict_roi",
+                "jpeg": jpeg,
+                "weights_path": str(weights_path),
+                "meta": meta,
+                "roi": dict(roi),
+                "thresholds": dict(thresholds),
+                "min_area_px": float(min_area_px),
+                "recording": recording,
+                "draw": bool(draw),
+            }
+        )
+
+    def _submit(self, job: dict[str, Any]) -> dict[str, Any]:
         from segment_inspect import ModelBusy  # noqa: PLC0415
 
         with self._lock:
@@ -140,18 +201,7 @@ class InferClient:
                 self._ensure_process_locked()
                 assert self._request_q is not None
                 assert self._response_q is not None
-                self._request_q.put(
-                    {
-                        "cmd": "predict",
-                        "jpeg": jpeg,
-                        "weights_path": str(weights_path),
-                        "meta": meta,
-                        "threshold": threshold,
-                        "speed": speed,
-                        "recording": recording,
-                        "draw": bool(draw),
-                    }
-                )
+                self._request_q.put(job)
             except Exception:
                 self._busy = False
                 raise

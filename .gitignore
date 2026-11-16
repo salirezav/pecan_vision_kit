@@ -4,6 +4,7 @@ __pycache__/
 *.pyo
 config/ap-credentials.txt
 hand-off.md
+AGENT-PROMPT-roi-sample-history.md
 RELEASE-HOWTO.md
 ARCHITECTURE.md
 *.avi

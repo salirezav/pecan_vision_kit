@@ -2,12 +2,41 @@
 
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, send_file
 
-from segment import ModelBusy
+import deploy_runs
+import roi_store
 import runtime as rt
+from segment import ModelBusy
 
 bp = Blueprint("model", __name__)
+
+
+def _camera_size() -> tuple[int | None, int | None]:
+    try:
+        status = rt.require_cam().status()
+    except Exception:  # noqa: BLE001
+        return None, None
+    width = int(status.get("width") or 0) or None
+    height = int(status.get("height") or 0) or None
+    return width, height
+
+
+def _roi_for_predict(data: dict) -> dict | None:
+    """Body roi wins; otherwise the shared camera ROI. None means full frame."""
+    if "roi" in data:
+        raw = data.get("roi")
+        if raw is None or raw is False or raw == {}:
+            return None
+        return roi_store.validate_roi(raw)
+    return roi_store.load_roi()
+
+
+def _roi_space() -> dict | None:
+    width, height = _camera_size()
+    if width and height:
+        return {"width": width, "height": height}
+    return None
 
 
 @bp.app_errorhandler(413)
@@ -16,9 +45,11 @@ def request_too_large(_err: Exception):
         return jsonify({"ok": False, "error": "That file is too large (limit 800 MB)."}), 413
     return "That file is too large (limit 800 MB).", 413
 
+
 @bp.route("/api/model", methods=["GET"])
 def api_model():
     return jsonify({"ok": True, **rt.models.status()})
+
 
 @bp.route("/api/model/upload", methods=["POST"])
 def api_model_upload():
@@ -32,8 +63,11 @@ def api_model_upload():
             request.form.get("class_names", ""),
         )
         return jsonify({"ok": True, **status})
+    except ModelBusy as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 409
     except Exception as exc:  # noqa: BLE001
         return jsonify({"ok": False, "error": str(exc)}), 400
+
 
 @bp.route("/api/model/names", methods=["POST"])
 def api_model_names():
@@ -41,12 +75,28 @@ def api_model_names():
     try:
         status = rt.models.update_names(str(data.get("class_names") or ""))
         return jsonify({"ok": True, **status})
+    except ModelBusy as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 409
     except Exception as exc:  # noqa: BLE001
         return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@bp.route("/api/model/select", methods=["POST"])
+def api_model_select():
+    data = request.get_json(silent=True) or {}
+    try:
+        status = rt.models.select_model(str(data.get("id") or ""))
+        return jsonify({"ok": True, **status})
+    except ModelBusy as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 409
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
 
 @bp.route("/api/model/metrics", methods=["GET"])
 def api_model_metrics_get():
     return jsonify({"ok": True, "metrics": rt.models.list_metrics()})
+
 
 @bp.route("/api/model/metrics", methods=["PUT"])
 def api_model_metrics_put():
@@ -57,6 +107,34 @@ def api_model_metrics_put():
         return jsonify({"ok": True, "metrics": metrics})
     except Exception as exc:  # noqa: BLE001
         return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@bp.route("/api/model/roi", methods=["GET"])
+def api_model_roi_get():
+    width, height = _camera_size()
+    return jsonify({"ok": True, **roi_store.status(width=width, height=height)})
+
+
+@bp.route("/api/model/roi", methods=["PUT"])
+def api_model_roi_put():
+    data = request.get_json(silent=True) or {}
+    raw = data.get("roi") if isinstance(data, dict) and "roi" in data else data
+    width, height = _camera_size()
+    try:
+        rect = roi_store.save_roi(raw, width=width, height=height)
+        return jsonify({"ok": True, **roi_store.status(width=width, height=height), "roi": rect})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/model/roi", methods=["DELETE"])
+def api_model_roi_delete():
+    roi_store.clear_roi()
+    width, height = _camera_size()
+    return jsonify({"ok": True, **roi_store.status(width=width, height=height)})
+
 
 @bp.route("/api/model/run", methods=["POST"])
 def api_model_run():
@@ -70,20 +148,32 @@ def api_model_run():
     if isinstance(draw, str):
         draw = draw.strip().lower() not in {"0", "false", "no"}
     try:
+        roi = _roi_for_predict(data)
         jpeg = rt.capture_infer_jpeg(speed)
         if jpeg is None:
             return jsonify({"ok": False, "error": "The camera does not have a frame yet."}), 503
         return jsonify(
-            rt.models.predict_jpeg(jpeg, threshold, speed=speed, draw=bool(draw))
+            rt.models.predict_jpeg(
+                jpeg,
+                threshold,
+                speed=speed,
+                draw=bool(draw),
+                roi=roi,
+                roi_space=_roi_space() if roi else None,
+            )
         )
     except ModelBusy as exc:
         return jsonify({"ok": False, "error": str(exc)}), 409
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:  # noqa: BLE001
         return jsonify({"ok": False, "error": str(exc)}), 500
+
 
 @bp.route("/api/deploy/live", methods=["GET"])
 def api_deploy_live_get():
     return jsonify({"ok": True, **rt.deploy_live.status(), "model": rt.models.status()})
+
 
 @bp.route("/api/deploy/live/start", methods=["POST"])
 def api_deploy_live_start():
@@ -93,6 +183,10 @@ def api_deploy_live_start():
     except (TypeError, ValueError):
         threshold = 0.5
     speed = str(data.get("speed") or "fast")
+    try:
+        interval_sec = float(data.get("interval_sec", 1.0))
+    except (TypeError, ValueError):
+        interval_sec = 1.0
     try:
         status = rt.models.status()
         if not status.get("installed"):
@@ -104,13 +198,27 @@ def api_deploy_live_start():
                     "error": status.get("library_error") or "The model library is not ready.",
                 }
             ), 400
-        return jsonify({"ok": True, **rt.deploy_live.start(threshold, speed)})
+        if rt.review_live.is_running():
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "Stop Review before starting Deploy live inference.",
+                }
+            ), 409
+        return jsonify(
+            {
+                "ok": True,
+                **rt.deploy_live.start(threshold, speed, interval_sec=interval_sec),
+            }
+        )
     except Exception as exc:  # noqa: BLE001
         return jsonify({"ok": False, "error": str(exc)}), 500
+
 
 @bp.route("/api/deploy/live/stop", methods=["POST"])
 def api_deploy_live_stop():
     return jsonify({"ok": True, **rt.deploy_live.stop()})
+
 
 @bp.route("/api/deploy/live/reset", methods=["POST"])
 def api_deploy_live_reset():
@@ -118,4 +226,107 @@ def api_deploy_live_reset():
         return jsonify({"ok": True, **rt.deploy_live.reset()})
     except Exception as exc:  # noqa: BLE001
         return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@bp.route("/api/deploy/runs", methods=["GET"])
+def api_deploy_runs_list():
+    return jsonify({"ok": True, "runs": deploy_runs.list_runs()})
+
+
+@bp.route("/api/deploy/runs/<run_id>", methods=["GET"])
+def api_deploy_runs_get(run_id: str):
+    try:
+        return jsonify({"ok": True, **deploy_runs.get_run(run_id)})
+    except FileNotFoundError:
+        return jsonify({"ok": False, "error": "That run was not found."}), 404
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/deploy/runs/<run_id>/csv", methods=["GET"])
+def api_deploy_runs_csv(run_id: str):
+    try:
+        path = deploy_runs.csv_path(run_id)
+        return send_file(
+            path,
+            mimetype="text/csv",
+            as_attachment=True,
+            download_name=f"deploy-{run_id}.csv",
+        )
+    except FileNotFoundError:
+        return jsonify({"ok": False, "error": "That run was not found."}), 404
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@bp.route("/api/review", methods=["GET"])
+def api_review_get():
+    return jsonify({"ok": True, **rt.review_live.status(heartbeat=True)})
+
+
+@bp.route("/api/review/preview-frame", methods=["POST"])
+def api_review_preview_frame():
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify({"ok": True, **rt.review_live.preview_frame(str(data.get("source") or ""))})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/review/start", methods=["POST"])
+def api_review_start():
+    data = request.get_json(silent=True) or {}
+    try:
+        if rt.deploy_live.status().get("running"):
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "Stop Deploy live inference before starting a review.",
+                }
+            ), 409
+        if rt.models.status().get("running"):
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "The model is already working. Wait for it to finish.",
+                }
+            ), 409
+        return jsonify({"ok": True, **rt.review_live.start(data)})
+    except ModelBusy as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 409
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/review/action", methods=["POST"])
+def api_review_action():
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify({"ok": True, **rt.review_live.action(str(data.get("action") or ""))})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/review/calibration", methods=["POST"])
+def api_review_calibration():
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify({"ok": True, **rt.review_live.calibrate(data)})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/review/stop", methods=["POST"])
+def api_review_stop():
+    return jsonify({"ok": True, **rt.review_live.stop()})
 

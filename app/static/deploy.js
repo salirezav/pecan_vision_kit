@@ -22,6 +22,18 @@
   const metaElapsed = document.getElementById("meta-elapsed");
   const metaMetrics = document.getElementById("meta-metrics");
   const metaLive = document.getElementById("meta-live");
+  const intervalEl = document.getElementById("interval");
+  const rateCapEl = document.getElementById("rate-cap");
+  const thisRunEl = document.getElementById("this-run");
+  const roiStatusEl = document.getElementById("roi-status");
+  const cameraWrap = document.getElementById("camera-wrap");
+  const cameraPreview = document.getElementById("camera-preview");
+  const runsListEl = document.getElementById("runs-list");
+  const runDetailEl = document.getElementById("run-detail");
+  const runTableWrap = document.getElementById("run-table-wrap");
+  const runCsvEl = document.getElementById("run-csv");
+  const refreshRunsBtn = document.getElementById("btn-refresh-runs");
+  const closeRunBtn = document.getElementById("btn-close-run");
 
   const COLORS = ["#c4a35a", "#7dcea0", "#5dade2", "#f5b041", "#af7ac5", "#e74c3c", "#48c9b0", "#f4d03f"];
 
@@ -32,7 +44,11 @@
   let runSums = {};
   let histories = {};
   let frameValues = {};
+  let pecanBuiltins = {};
+  let pecanReady = false;
   let pollTimer = null;
+  let runId = null;
+  let roiDrawer = null;
 
   function setMsg(text, kind) {
     msgEl.textContent = text || "";
@@ -50,44 +66,34 @@
     return (model && model.class_names) || [];
   }
 
-  function formatTerm(measure, labels) {
-    if (!labels.length) return "—";
-    if (labels.length === 1) return measure + "(" + labels[0] + ")";
-    return labels.map((name) => measure + "(" + name + ")").join(" + ");
+  function normalizeMetric(metric) {
+    return window.MetricFormula.normalizeMetric(metric);
   }
 
-  function formatFormula(measure, numerator, denominator) {
-    const top = formatTerm(measure, numerator);
-    const bottom = formatTerm(measure, denominator);
-    if (denominator.length > 1) return top + " / (" + bottom + ")";
-    return top + " / " + bottom;
+  function metricFormula(metric) {
+    return normalizeMetric(metric).formula || "";
   }
 
   function metricIsStale(metric) {
     const known = new Set(classNames());
-    return [].concat(metric.numerator || [], metric.denominator || []).some((name) => !known.has(name));
+    return window.MetricFormula.formulaLabels(metricFormula(metric)).some((name) => !known.has(name));
   }
 
-  function sumLabels(source, labels, measure) {
-    let total = 0;
-    for (const name of labels) {
-      const row = source && source[name];
-      if (!row) continue;
-      total += Number(row[measure] || 0);
-    }
-    return total;
-  }
-
-  function ratioParts(metric, source) {
+  function evaluateMetric(metric, source) {
     if (!source || metricIsStale(metric)) return null;
-    const numerator = sumLabels(source, metric.numerator || [], metric.measure);
-    const denominator = sumLabels(source, metric.denominator || [], metric.measure);
-    return { numerator, denominator };
+    try {
+      return window.MetricFormula.evaluateFormula(metricFormula(metric), source);
+    } catch (_err) {
+      return null;
+    }
   }
 
-  function formatPercent(numerator, denominator) {
-    if (!denominator) return "—";
-    return ((numerator / denominator) * 100).toFixed(1) + "%";
+  function formatValue(value) {
+    if (value == null || !Number.isFinite(value)) return "—";
+    const abs = Math.abs(value);
+    if (abs >= 100) return value.toFixed(1);
+    if (abs >= 1) return value.toFixed(2);
+    return value.toFixed(3);
   }
 
   function chartSvg(points, color) {
@@ -103,9 +109,14 @@
         "</svg>"
       );
     }
-    const min = Math.min(0, ...usable);
-    const max = Math.max(100, ...usable);
-    const span = Math.max(max - min, 1);
+    let min = Math.min(...usable);
+    let max = Math.max(...usable);
+    if (max === min) {
+      const pad = Math.max(Math.abs(max) * 0.05, 0.01);
+      min -= pad;
+      max += pad;
+    }
+    const span = Math.max(max - min, 0.01);
     const step = points.length > 1 ? (width - padX * 2) / (points.length - 1) : 0;
     const coords = points.map((value, index) => {
       if (value == null || !Number.isFinite(value)) return null;
@@ -134,38 +145,66 @@
     );
   }
 
+  function renderBuiltinPanels(parts, colorOffset) {
+    if (!pecanReady) return colorOffset;
+    const ids = [
+      "pecan_exposed_kernel_mean",
+      "pecan_exposed_kernel_median",
+      "pecan_broken_kernel_area_per_100",
+    ];
+    ids.forEach((id, index) => {
+      const card = pecanBuiltins[id] || { id, name: id, ready: false, message: "insufficient data" };
+      const color = COLORS[(colorOffset + index) % COLORS.length];
+      const series = histories[id] || [];
+      const valueText = card.ready && card.value != null ? formatValue(card.value) : "—";
+      let detail = card.message || card.detail || "Waiting for pecan samples";
+      if (card.ready && card.ci95) {
+        detail = (card.detail || "") + " · 95% CI [" + formatValue(card.ci95[0]) + ", " + formatValue(card.ci95[1]) + "]";
+      }
+      parts.push(
+        '<article class="grafana-panel">' +
+        '<div class="grafana-panel-head">' +
+        '<div><p class="grafana-title">' + escapeHtml(card.name || id) + " <span class=\"metric-badge\">built-in</span></p>" +
+        '<p class="grafana-formula">Edge-cut pecans excluded · N ≥ 200</p></div>' +
+        '<p class="grafana-big" style="color:' + color + '">' + escapeHtml(valueText) + "</p>" +
+        "</div>" +
+        chartSvg(series, color) +
+        '<div class="grafana-foot">' +
+        "<span>N <strong>" + escapeHtml(String(card.n || 0)) + "</strong></span>" +
+        "<span>" + escapeHtml(detail) + "</span>" +
+        "</div></article>"
+      );
+    });
+    return colorOffset + ids.length;
+  }
+
   function renderBoard() {
     metaFrames.textContent = String(runFrames);
-    metaMetrics.textContent = String(metrics.length);
+    const panelCount = metrics.length + (pecanReady ? 3 : 0);
+    metaMetrics.textContent = String(panelCount);
     metaLive.textContent = live ? "Live" : (runFrames ? "Stopped" : "Idle");
 
-    if (!metrics.length) {
-      noteEl.textContent = "No metrics yet. Open Model, save a formula, then come back here.";
-      gridEl.innerHTML = '<div class="grafana-empty">Metrics you save on the Model page appear here as live charts.</div>';
-      return;
-    }
-    noteEl.textContent = live
-      ? "Updating on each inference frame."
-      : (runFrames ? "Last run is still on the charts. Start again to begin a new series." : "Press Start live run to fill the charts.");
-
-    gridEl.innerHTML = metrics.map((metric, index) => {
-      const stale = metricIsStale(metric);
-      const color = COLORS[index % COLORS.length];
-      const formula = formatFormula(metric.measure, metric.numerator || [], metric.denominator || []);
+    const parts = [];
+    let colorOffset = renderBuiltinPanels(parts, 0);
+    metrics.forEach((metric, index) => {
+      const normalized = normalizeMetric(metric);
+      const stale = metricIsStale(normalized);
+      const color = COLORS[(colorOffset + index) % COLORS.length];
+      const formula = normalized.formula || "";
       const frame = frameValues[metric.id];
-      const run = ratioParts(metric, runFrames ? runSums : null);
-      const frameText = stale ? "—" : (frame && frame.denominator ? formatPercent(frame.numerator, frame.denominator) : "—");
-      const runText = stale ? "—" : (run && run.denominator ? formatPercent(run.numerator, run.denominator) : "—");
+      const runValue = evaluateMetric(normalized, runFrames ? runSums : null);
+      const frameText = stale ? "—" : (frame && frame.value != null ? formatValue(frame.value) : "—");
+      const runText = stale ? "—" : formatValue(runValue);
       const detail = stale
         ? "Labels missing from this model"
-        : (run && run.denominator
-          ? run.numerator.toLocaleString() + " / " + run.denominator.toLocaleString() + (metric.measure === "area" ? " px" : "")
+        : (runValue != null
+          ? "Formula result on accumulated class totals"
           : "Waiting for labels in the run");
       const series = histories[metric.id] || [];
-      return (
+      parts.push(
         '<article class="grafana-panel' + (stale ? " stale" : "") + '">' +
         '<div class="grafana-panel-head">' +
-        '<div><p class="grafana-title">' + escapeHtml(metric.name) + "</p>" +
+        '<div><p class="grafana-title">' + escapeHtml(normalized.name) + "</p>" +
         '<p class="grafana-formula">' + escapeHtml(formula) + "</p></div>" +
         '<p class="grafana-big" style="color:' + color + '">' + escapeHtml(runText) + "</p>" +
         "</div>" +
@@ -175,7 +214,17 @@
         "<span>" + escapeHtml(detail) + "</span>" +
         "</div></article>"
       );
-    }).join("");
+    });
+
+    if (!parts.length) {
+      noteEl.textContent = "No metrics yet. Open Model, save a formula, then come back here.";
+      gridEl.innerHTML = '<div class="grafana-empty">Metrics you save on the Model page appear here as live charts.</div>';
+      return;
+    }
+    noteEl.textContent = live
+      ? "Updating on each inference frame."
+      : (runFrames ? "Last run is still on the charts. Start again to begin a new series." : "Press Start live run to fill the charts.");
+    gridEl.innerHTML = parts.join("");
   }
 
   function modelReady() {
@@ -196,12 +245,72 @@
     emptyEl.hidden = true;
   }
 
+  function updateRateCap(data) {
+    if (!rateCapEl) return;
+    const minInterval = data.min_interval_sec;
+    const maxHz = data.max_hz;
+    const requested = data.requested_interval_sec;
+    const actual = data.interval_sec;
+    if (minInterval == null || maxHz == null) {
+      rateCapEl.hidden = true;
+      rateCapEl.textContent = "";
+      return;
+    }
+    rateCapEl.hidden = false;
+    let text = "Limited to ~" + Number(maxHz).toFixed(2) + " Hz by current inference speed.";
+    if (requested != null && actual != null && Number(actual) > Number(requested) + 0.01) {
+      text += " Using " + Number(actual).toFixed(2) + " s between samples.";
+    }
+    rateCapEl.textContent = text;
+  }
+
+  function updateThisRun(data) {
+    runId = data.run_id || runId;
+    if (!thisRunEl) return;
+    if (live && runId) {
+      thisRunEl.hidden = false;
+      thisRunEl.innerHTML =
+        "This run: <a href=\"/api/deploy/runs/" +
+        encodeURIComponent(runId) +
+        "/csv\">download CSV</a> · " +
+        runFrames +
+        " sample" +
+        (runFrames === 1 ? "" : "s");
+    } else if (runId && runFrames) {
+      thisRunEl.hidden = false;
+      thisRunEl.innerHTML =
+        "Last run <code>" +
+        escapeHtml(runId) +
+        "</code>: <a href=\"/api/deploy/runs/" +
+        encodeURIComponent(runId) +
+        "/csv\">download CSV</a>";
+    } else {
+      thisRunEl.hidden = true;
+      thisRunEl.textContent = "";
+    }
+  }
+
+  function updateRoiOverlay(data) {
+    const roi = data.roi || null;
+    if (roiStatusEl) {
+      if (!roi) {
+        roiStatusEl.textContent = "Camera region: full frame (set on Model).";
+      } else {
+        roiStatusEl.textContent =
+          "Camera region: " + roi.w + "×" + roi.h + " at (" + roi.x + ", " + roi.y + ").";
+      }
+    }
+    if (roiDrawer) roiDrawer.setRoi(roi);
+  }
+
   function applySnapshot(data) {
     live = Boolean(data.running);
     runFrames = Number(data.frames || 0);
     runSums = data.run_sums || {};
     histories = data.histories || {};
     frameValues = data.frame_values || {};
+    pecanBuiltins = data.pecan_builtins || {};
+    pecanReady = Boolean(data.pecan_ready);
     metrics = data.metrics || metrics;
     if (data.model) model = data.model;
     if (data.threshold != null && document.activeElement !== thresholdEl) {
@@ -211,10 +320,20 @@
     if (data.speed && document.activeElement !== speedEl) {
       speedEl.value = data.speed;
     }
+    if (data.interval_sec != null && intervalEl && document.activeElement !== intervalEl) {
+      intervalEl.value = String(data.requested_interval_sec != null ? data.requested_interval_sec : data.interval_sec);
+    }
     if (data.elapsed_ms != null) {
       metaElapsed.textContent = (Number(data.elapsed_ms) / 1000).toFixed(1) + "s";
     }
     if (data.image) showResult(data.image);
+    else if (!live && !runFrames) {
+      resultEl.hidden = true;
+      emptyEl.hidden = false;
+    }
+    updateRateCap(data);
+    updateThisRun(data);
+    updateRoiOverlay(data);
     if (data.error) setMsg(data.error, "err");
     else if (live) setMsg("Live inference running.", "ok");
     renderStatus();
@@ -286,6 +405,9 @@
   startBtn.addEventListener("click", async () => {
     if (live || !modelReady()) return;
     setMsg("Starting live run…", "");
+    resultEl.hidden = true;
+    emptyEl.hidden = false;
+    emptyEl.textContent = "Waiting for the first sample…";
     try {
       const response = await fetch("/api/deploy/live/start", {
         method: "POST",
@@ -293,13 +415,16 @@
         body: JSON.stringify({
           threshold: Number(thresholdEl.value),
           speed: speedEl ? speedEl.value : "fast",
+          interval_sec: intervalEl ? Number(intervalEl.value) : 1.0,
         }),
       });
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error || "Could not start live run.");
       applySnapshot(data);
       setMsg("Live inference running.", "ok");
+      refreshRuns();
     } catch (err) {
+      emptyEl.textContent = "Start live inference to see the model result here.";
       setMsg(err.message || String(err), "err");
     }
   });
@@ -311,6 +436,7 @@
       if (!response.ok || !data.ok) throw new Error(data.error || "Could not stop live run.");
       applySnapshot(data);
       setMsg("Live run stopped.", "ok");
+      refreshRuns();
     } catch (err) {
       setMsg(err.message || String(err), "err");
     }
@@ -323,13 +449,117 @@
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error || "Could not reset charts.");
       applySnapshot(data);
+      resultEl.hidden = true;
+      emptyEl.hidden = false;
+      emptyEl.textContent = "Start live inference to see the model result here.";
       setMsg("Charts cleared.", "ok");
     } catch (err) {
       setMsg(err.message || String(err), "err");
     }
   });
 
-  refreshLive().catch((err) => {
+  async function refreshRoi() {
+    try {
+      const response = await fetch("/api/model/roi");
+      const data = await response.json();
+      if (!response.ok || !data.ok) return;
+      updateRoiOverlay(data);
+    } catch (_err) {
+      /* ignore */
+    }
+  }
+
+  async function refreshRuns() {
+    if (!runsListEl) return;
+    try {
+      const response = await fetch("/api/deploy/runs");
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || "Could not list runs.");
+      const runs = data.runs || [];
+      if (!runs.length) {
+        runsListEl.innerHTML = "<p class=\"hint\">No saved runs yet. Start and stop a live run to create one.</p>";
+        return;
+      }
+      runsListEl.innerHTML = runs.map((run) => {
+        const frames = run.frames == null ? "—" : String(run.frames);
+        const when = run.started_at ? escapeHtml(String(run.started_at).replace("T", " ").slice(0, 19)) : escapeHtml(run.id);
+        return (
+          "<button type=\"button\" class=\"run-row\" data-run-id=\"" +
+          escapeHtml(run.id) +
+          "\"><strong>" +
+          when +
+          "</strong><span>" +
+          frames +
+          " samples · " +
+          escapeHtml(run.status || "") +
+          (run.model_filename ? " · " + escapeHtml(run.model_filename) : "") +
+          "</span></button>"
+        );
+      }).join("");
+    } catch (err) {
+      runsListEl.innerHTML = "<p class=\"msg err\">" + escapeHtml(err.message || String(err)) + "</p>";
+    }
+  }
+
+  async function openRun(id) {
+    if (!runDetailEl || !runTableWrap) return;
+    try {
+      const response = await fetch("/api/deploy/runs/" + encodeURIComponent(id));
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || "Could not open that run.");
+      const samples = data.samples || [];
+      runDetailEl.hidden = false;
+      if (runCsvEl) runCsvEl.href = "/api/deploy/runs/" + encodeURIComponent(id) + "/csv";
+      if (!samples.length) {
+        runTableWrap.innerHTML = "<p class=\"hint\">This run has no sample rows yet.</p>";
+        return;
+      }
+      const keys = Object.keys(samples[0]);
+      const head = keys.map((key) => "<th>" + escapeHtml(key) + "</th>").join("");
+      const body = samples.slice(0, 200).map((row) => {
+        return "<tr>" + keys.map((key) => "<td>" + escapeHtml(row[key] == null ? "" : row[key]) + "</td>").join("") + "</tr>";
+      }).join("");
+      runTableWrap.innerHTML =
+        "<table class=\"run-table\"><thead><tr>" +
+        head +
+        "</tr></thead><tbody>" +
+        body +
+        "</tbody></table>" +
+        (samples.length > 200 ? "<p class=\"hint\">Showing the first 200 rows. Download the CSV for the full run.</p>" : "");
+    } catch (err) {
+      setMsg(err.message || String(err), "err");
+    }
+  }
+
+  if (runsListEl) {
+    runsListEl.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-run-id]");
+      if (!button) return;
+      openRun(button.getAttribute("data-run-id"));
+    });
+  }
+  if (refreshRunsBtn) refreshRunsBtn.addEventListener("click", () => refreshRuns());
+  if (closeRunBtn) {
+    closeRunBtn.addEventListener("click", () => {
+      if (runDetailEl) runDetailEl.hidden = true;
+    });
+  }
+
+  if (cameraWrap && cameraPreview && window.RoiDrawer) {
+    roiDrawer = new window.RoiDrawer({
+      wrap: cameraWrap,
+      img: cameraPreview,
+      readOnly: true,
+    });
+    cameraPreview.addEventListener("load", () => {
+      if (roiDrawer) roiDrawer.refresh();
+    });
+    window.addEventListener("resize", () => {
+      if (roiDrawer) roiDrawer.refresh();
+    });
+  }
+
+  Promise.all([refreshLive(), refreshRoi(), refreshRuns()]).catch((err) => {
     statusEl.textContent = err.message || String(err);
     statusEl.className = "msg err";
   });

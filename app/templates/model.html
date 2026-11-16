@@ -4,8 +4,8 @@
 <section class="model-layout">
   <div class="model-stage">
     <div class="model-views">
-      <div class="preview-wrap">
-        <img class="preview" src="{{ url_for('camera.video_feed') }}" alt="Live camera preview">
+      <div class="preview-wrap" id="camera-wrap">
+        <img id="camera-preview" class="preview" src="{{ url_for('camera.video_feed') }}" alt="Live camera preview">
         <div class="preview-caption">Live camera</div>
       </div>
       <div class="preview-wrap">
@@ -15,50 +15,71 @@
       </div>
     </div>
 
-    <div class="controls model-setup">
-      <p class="hint">Upload and test a model here. Save the metrics you care about, then open <a href="{{ url_for('ui.deploy_page') }}">Deploy</a> for live Grafana-style charts.</p>
-      <p id="model-status" class="msg">Looking for a model…</p>
-      <div id="model-card" class="model-card" hidden>
-        <p id="model-kind" class="model-kind"></p>
-        <p id="model-does" class="model-summary"></p>
-        <dl id="model-facts" class="model-facts"></dl>
-        <p id="model-names-note" class="hint"></p>
-        <ul id="class-chips" class="class-chips"></ul>
-        <p id="model-library" class="msg err" hidden></p>
-      </div>
-
-      <form id="upload-form" class="form-grid">
-        <label class="wide">Weights file
-          <input id="weights-file" name="file" type="file" accept=".pt,.pth,.hef">
-        </label>
-        <label id="names-field" class="wide">Class names, in order
-          <input id="class-names" name="class_names" type="text" placeholder="Leave blank to use the names stored in the file" autocomplete="off">
-        </label>
-        <div class="row-actions">
-          <button id="btn-upload" class="btn primary" type="submit">Upload model</button>
-          <button id="btn-names" class="btn" type="button">Save names</button>
+    <div class="model-side">
+      <section class="panel model-panel" aria-labelledby="model-panel-title">
+        <h2 id="model-panel-title" class="model-section-title">Model</h2>
+        <p class="hint">Pick a saved weights file to see what it is. Uploads stay on this kit. Open <a href="{{ url_for('ui.deploy_page') }}">Deploy</a> for live charts.</p>
+        <div class="model-library">
+          <p id="model-library-hint" class="hint">Uploaded weights stay on this kit. Select one to use for inference.</p>
+          <ul id="model-list" class="model-list" aria-label="Models on this kit"></ul>
+          <p id="model-list-empty" class="msg">No weights saved yet.</p>
         </div>
-      </form>
+        <p id="model-status" class="msg">Looking for a model…</p>
+        <div id="model-card" class="model-card" hidden>
+          <p id="model-kind" class="model-kind"></p>
+          <p id="model-does" class="model-summary"></p>
+          <dl id="model-facts" class="model-facts"></dl>
+          <p id="model-names-note" class="hint"></p>
+          <ul id="class-chips" class="class-chips"></ul>
+          <p id="model-library" class="msg err" hidden></p>
+        </div>
 
-      <label id="confidence-row" class="threshold-row"><span id="confidence-label">Confidence</span>
-        <input id="threshold" type="range" min="0.05" max="0.95" step="0.05" value="0.50">
-        <span id="threshold-value">50%</span>
-      </label>
-      <label class="speed-row">Speed
-        <select id="speed">
-          <option value="fast" selected>Fast</option>
-          <option value="balanced">Balanced</option>
-          <option value="accurate">Accurate</option>
-        </select>
-      </label>
+        <form id="upload-form" class="form-grid">
+          <label class="wide">Weights file
+            <input id="weights-file" name="file" type="file" accept=".pt,.pth,.hef">
+          </label>
+          <label id="names-field" class="wide">Class names, in order
+            <input id="class-names" name="class_names" type="text" placeholder="Leave blank to use the names stored in the file" autocomplete="off">
+          </label>
+          <div class="row-actions">
+            <button id="btn-upload" class="btn primary" type="submit">Upload model</button>
+            <button id="btn-names" class="btn" type="button">Save names</button>
+          </div>
+        </form>
+      </section>
 
-      <div class="big-actions">
-        <button id="btn-check" class="btn start" type="button">Check this frame</button>
-        <button id="btn-start" class="btn" type="button">Keep checking</button>
-        <button id="btn-stop" class="btn stop" type="button" disabled>Stop checking</button>
-      </div>
-      <p id="msg" class="msg" aria-live="polite"></p>
-      <div id="counts" class="class-list"></div>
+      <section class="panel model-panel model-check" aria-labelledby="check-panel-title">
+        <h2 id="check-panel-title" class="model-section-title">Check</h2>
+        <p class="hint">Run the selected model on the live camera.</p>
+        <label id="confidence-row" class="threshold-row"><span id="confidence-label">Confidence</span>
+          <input id="threshold" type="range" min="0.05" max="0.95" step="0.05" value="0.50">
+          <span id="threshold-value">50%</span>
+        </label>
+        <label class="speed-row">Speed
+          <select id="speed">
+            <option value="fast" selected>Fast</option>
+            <option value="balanced">Balanced</option>
+            <option value="accurate">Accurate</option>
+          </select>
+        </label>
+
+        <div class="roi-controls">
+          <p class="hint">Draw a region on the live camera. Cleared means the whole frame. Deploy uses this same region.</p>
+          <p id="roi-status" class="msg">Using the full frame.</p>
+          <div class="row-actions">
+            <button id="btn-roi-redraw" class="btn" type="button">Redraw region</button>
+            <button id="btn-roi-clear" class="btn" type="button">Clear region</button>
+          </div>
+        </div>
+
+        <div class="big-actions">
+          <button id="btn-check" class="btn start" type="button">Check this frame</button>
+          <button id="btn-start" class="btn" type="button">Keep checking</button>
+          <button id="btn-stop" class="btn stop" type="button" disabled>Stop checking</button>
+        </div>
+        <p id="msg" class="msg" aria-live="polite"></p>
+        <div id="counts" class="class-list"></div>
+      </section>
     </div>
   </div>
 
@@ -71,24 +92,18 @@
     <div id="metrics-list" class="metrics-list"></div>
     <form id="metric-form" class="metric-form">
       <label class="wide">Name
-        <input id="metric-name" type="text" maxlength="80" placeholder="Intact-half ratio" autocomplete="off">
+        <input id="metric-name" type="text" maxlength="80" placeholder="Untouched rate" autocomplete="off">
       </label>
-      <fieldset id="metric-measure-row" class="metric-measure">
-        <legend>Measure</legend>
-        <label><input type="radio" name="metric-measure" value="area" checked> Pixel area</label>
-        <label><input type="radio" name="metric-measure" value="count"> Object count</label>
-      </fieldset>
-      <div class="metric-sides">
-        <div>
-          <p class="metric-side-label">Numerator</p>
-          <ul id="metric-num" class="metric-chips"></ul>
+      <label class="wide">Formula
+        <div class="metric-formula-wrap">
+          <input id="metric-formula-input" type="text" maxlength="400"
+            placeholder="100 * count(pecan_uncracked) / (count(pecan_uncracked) + count(pecan_hairline) + …)"
+            autocomplete="off" spellcheck="false">
+          <ul id="metric-formula-suggest" class="metric-formula-suggest" hidden></ul>
         </div>
-        <div>
-          <p class="metric-side-label">Denominator</p>
-          <ul id="metric-den" class="metric-chips"></ul>
-        </div>
-      </div>
-      <p id="metric-formula" class="metric-formula"></p>
+      </label>
+      <p id="metric-formula-hint" class="hint">Use count(Class) or area(Class) with + − * / and parentheses. Type a class name after count( or area( to pick from suggestions.</p>
+      <p id="metric-formula" class="metric-formula" hidden></p>
       <div class="row-actions">
         <button id="btn-metric-save" class="btn primary" type="submit">Save metric</button>
         <button id="btn-metric-cancel" class="btn" type="button" hidden>Cancel edit</button>
@@ -99,5 +114,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='roi-draw.js') }}"></script>
+<script src="{{ url_for('static', filename='metric-formula.js') }}"></script>
 <script src="{{ url_for('static', filename='model.js') }}"></script>
 {% endblock %}

@@ -4,7 +4,7 @@
 <section class="deploy-layout">
   <div class="controls deploy-controls">
     <div class="deploy-controls-main">
-      <p class="hint">Live monitoring for metrics you set up on the <a href="{{ url_for('ui.model_page') }}">Model</a> page. Start a run to fill the charts below.</p>
+      <p class="hint">Live monitoring for metrics you set up on the <a href="{{ url_for('ui.model_page') }}">Model</a> page. Draw the camera region there; Deploy uses the same region. Start a run to fill the charts below.</p>
       <p id="model-status" class="msg">Looking for a model…</p>
       <div id="model-card" class="model-card deploy-model-card" hidden>
         <div class="deploy-model-info">
@@ -20,6 +20,7 @@
         </dl>
       </div>
       <p id="msg" class="msg" aria-live="polite"></p>
+      <p id="roi-status" class="msg">Camera region: full frame.</p>
     </div>
 
     <div class="deploy-controls-run">
@@ -34,17 +35,22 @@
           <option value="accurate">Accurate</option>
         </select>
       </label>
+      <label class="deploy-field">Sample every (seconds)
+        <input id="interval" type="number" min="0.2" max="60" step="0.1" value="1.0">
+      </label>
+      <p id="rate-cap" class="hint" hidden></p>
       <div class="deploy-actions">
         <button id="btn-start" class="btn primary" type="button">Start live run</button>
         <button id="btn-stop" class="btn danger" type="button" disabled>Stop live run</button>
         <button id="btn-reset-run" class="btn" type="button">Reset charts</button>
       </div>
+      <p id="this-run" class="hint" hidden></p>
     </div>
   </div>
 
   <div class="model-views deploy-views">
-    <div class="preview-wrap">
-      <img class="preview" src="{{ url_for('camera.video_feed') }}" alt="Live camera preview">
+    <div class="preview-wrap" id="camera-wrap">
+      <img id="camera-preview" class="preview" src="{{ url_for('camera.video_feed') }}" alt="Live camera preview">
       <div class="preview-caption">Live camera</div>
     </div>
     <div class="preview-wrap">
@@ -61,9 +67,26 @@
     </div>
     <div id="grafana-grid" class="grafana-grid"></div>
   </section>
+
+  <section class="deploy-history panel">
+    <div class="deploy-history-head">
+      <h2>Past runs</h2>
+      <button id="btn-refresh-runs" class="btn" type="button">Refresh</button>
+    </div>
+    <div id="runs-list" class="runs-list"></div>
+    <div id="run-detail" class="run-detail" hidden>
+      <div class="row-actions">
+        <button id="btn-close-run" class="btn" type="button">Close</button>
+        <a id="run-csv" class="btn" href="#">Download CSV</a>
+      </div>
+      <div id="run-table-wrap" class="run-table-wrap"></div>
+    </div>
+  </section>
 </section>
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='roi-draw.js') }}"></script>
+<script src="{{ url_for('static', filename='metric-formula.js') }}"></script>
 <script src="{{ url_for('static', filename='deploy.js') }}"></script>
 {% endblock %}

@@ -209,11 +209,11 @@ class CameraService:
             return None
         return buf.tobytes()
 
-    def get_infer_jpeg(self, max_side: int = 320, quality: int = 85) -> bytes | None:
+    def get_infer_jpeg(self, max_side: int = 1280, quality: int = 85) -> bytes | None:
         """Latest frame resized so the longest side is at most max_side, then JPEG-encoded.
 
-        Avoids shipping full-res frames through the inference worker when the model
-        only needs ~288–480 px input.
+        Callers pass a display ceiling. The worker still runs the network at the
+        selected speed, which is often smaller than this bitmap.
         """
         with self._lock:
             frame = None if self._frame is None else self._frame.copy()
