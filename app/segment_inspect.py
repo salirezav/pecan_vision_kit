@@ -16,8 +16,6 @@ os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 
 STORE_DIR = Path("/mnt/recordings/models")
 MAX_UPLOAD_BYTES = 800 * 1024 * 1024
-MAX_METRICS = 8
-_METRIC_MEASURES = frozenset({"area", "count"})
 
 # (class name, default resolution, decoder layers, queries)
 _SEG_SPECS: tuple[tuple[str, int, int, int], ...] = (
@@ -595,10 +593,6 @@ def library_error(family: str | None = None) -> str | None:
     if importlib.util.find_spec("rfdetr") is None:
         return "The model library is not ready yet (rfdetr is not installed)."
     return None
-
-
-def _library_error(family: str | None = None) -> str | None:
-    return library_error(family)
 
 
 def _finish_names(info: dict[str, Any], provided: list[str]) -> dict[str, Any]:

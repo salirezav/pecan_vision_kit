@@ -64,30 +64,6 @@ def _as_numpy(value: Any) -> np.ndarray:
         value = value.cpu()
     return np.asarray(value)
 
-def _metric_labels(
-    raw: Any,
-    side: str,
-    metric_name: str,
-    allowed: set[str],
-) -> list[str]:
-    if not isinstance(raw, list) or not raw:
-        raise ValueError(f"Metric {metric_name!r} needs at least one {side} label.")
-    labels: list[str] = []
-    seen: set[str] = set()
-    for entry in raw:
-        label = str(entry or "").strip()
-        if not label:
-            continue
-        if label not in allowed:
-            raise ValueError(f"Metric {metric_name!r} uses unknown label {label!r}.")
-        if label in seen:
-            continue
-        seen.add(label)
-        labels.append(label)
-    if not labels:
-        raise ValueError(f"Metric {metric_name!r} needs at least one {side} label.")
-    return labels
-
 def _build_measurements(
     labels: list[str],
     counts: dict[str, int],

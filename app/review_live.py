@@ -91,12 +91,27 @@ class ReviewLiveService:
         self._fit_warning: str | None = None
         self._last_seen = time.monotonic()
         self._connected = False
+        self._videos_cache: list[dict[str, Any]] = []
+        self._videos_cache_at = 0.0
 
     def is_running(self) -> bool:
         with self._lock:
             return self._running
 
+    def _cached_videos(self) -> list[dict[str, Any]]:
+        """Refresh the video list at most every two seconds, outside the playback lock."""
+        now = time.monotonic()
+        if self._videos_cache and now - self._videos_cache_at < 2.0:
+            return self._videos_cache
+        rows = self._list_videos()
+        self._videos_cache = rows
+        self._videos_cache_at = now
+        return rows
+
     def status(self, *, heartbeat: bool = False) -> dict[str, Any]:
+        # Disk work stays outside the playback lock so pause/seek/results stay responsive.
+        halfyield = self._halfyield_status()
+        videos = self._cached_videos()
         with self._lock:
             if heartbeat:
                 self._connected = True
@@ -129,8 +144,8 @@ class ReviewLiveService:
                 "image": self._image,
                 "elapsed_ms": self._elapsed_ms,
                 "fit_warning": self._fit_warning,
-                "halfyield": self._halfyield_status(),
-                "videos": self._list_videos(),
+                "halfyield": halfyield,
+                "videos": videos,
             }
 
     def start(self, values: dict[str, Any]) -> dict[str, Any]:
@@ -233,11 +248,6 @@ class ReviewLiveService:
                 self._status = "saving"
         return self.status()
 
-    def touch(self) -> None:
-        with self._lock:
-            self._connected = True
-            self._last_seen = time.monotonic()
-
     def preview_frame(self, source_raw: str) -> dict[str, Any]:
         source = self._resolve_source(source_raw)
         cap = cv2.VideoCapture(str(source))
@@ -322,8 +332,7 @@ class ReviewLiveService:
     def _loop(self, generation: int) -> None:
         cap: cv2.VideoCapture | None = None
         last_frame = None
-        meta = (self._halfyield_status().get("meta") or {}) if self._halfyield_status else {}
-        weights = Path(str(self._halfyield_status().get("path") or ""))
+        force_infer = True
         try:
             with self._lock:
                 source = self._source
@@ -365,6 +374,7 @@ class ReviewLiveService:
                     complete = self._complete
                 if pending is not None:
                     calibration = pending
+                    force_infer = True
                     with self._lock:
                         self._calibration = Calibration(
                             thresholds=dict(calibration.thresholds),
@@ -382,6 +392,7 @@ class ReviewLiveService:
                     action = None
 
                 if action in {"left", "right", "seek_back", "seek_forward", "prev_frame", "next_frame"}:
+                    force_infer = True
                     with self._lock:
                         self._history.clear()
                         self._complete_hist.clear()
@@ -437,13 +448,27 @@ class ReviewLiveService:
                         frame = last_frame
                     else:
                         last_frame = frame
+                    force_infer = True
                 else:
                     if last_frame is None:
                         ok, frame = cap.read()
                         if not ok:
                             break
                         last_frame = frame
+                        force_infer = True
                     frame = last_frame
+                    # Reuse the last overlay while paused so Deploy and /api/model/run
+                    # can use the only inference process.
+                    if not force_infer:
+                        pos_ms = float(cap.get(cv2.CAP_PROP_POS_MSEC) or 0.0)
+                        with self._lock:
+                            if generation != self._generation:
+                                break
+                            self._position = (
+                                self._duration if complete else max(0.0, pos_ms / 1000.0)
+                            )
+                        time.sleep(0.15 if slow else 0.12)
+                        continue
 
                 pos_ms = float(cap.get(cv2.CAP_PROP_POS_MSEC) or 0.0)
                 ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
@@ -491,6 +516,7 @@ class ReviewLiveService:
                     self._error = None
                     if result.get("roi"):
                         self._roi = dict(result["roi"])
+                force_infer = False
 
                 if paused:
                     time.sleep(0.15 if slow else 0.12)
@@ -522,12 +548,7 @@ class ReviewLiveService:
         if skip_ms <= 0:
             return
         end = float(cap.get(cv2.CAP_PROP_POS_MSEC) or 0.0) + min(float(skip_ms), 1000.0)
-        for _ in range(60):
-            if float(cap.get(cv2.CAP_PROP_POS_MSEC) or 0.0) >= end:
-                return
-            ok, _frame = cap.read()
-            if not ok:
-                return
+        cap.set(cv2.CAP_PROP_POS_MSEC, end)
 
     def _seek(self, cap: cv2.VideoCapture, delta_seconds: float) -> None:
         pos = float(cap.get(cv2.CAP_PROP_POS_MSEC) or 0.0)

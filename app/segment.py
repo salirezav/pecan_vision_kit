@@ -70,12 +70,11 @@ class ModelService:
         self._loaded = False
         self._loading = False
         self._error: str | None = None
+        self._halfyield_cache: dict[str, Any] | None = None
+        self._halfyield_cache_key: tuple[str | None, float | None] | None = None
 
     def start_worker(self) -> None:
         self._infer.start()
-
-    def stop_worker(self) -> None:
-        self._infer.stop()
 
     def library_dir(self) -> Path:
         return self.store_dir / "library"
@@ -566,7 +565,7 @@ class ModelService:
     def halfyield_status(self) -> dict[str, Any]:
         path = self.halfyield_weights_path()
         if path is None:
-            return {
+            missing = {
                 "installed": False,
                 "filename": None,
                 "path": None,
@@ -576,10 +575,13 @@ class ModelService:
                     f"{self.store_dir}/halfyield-model.pt."
                 ),
             }
+            self._halfyield_cache = missing
+            self._halfyield_cache_key = (None, None)
+            return missing
         try:
-            info = inspect_checkpoint(path)
-            finished = _finish_names(info, [])
-        except Exception as exc:  # noqa: BLE001
+            mtime = path.stat().st_mtime
+            size = path.stat().st_size
+        except OSError as exc:
             return {
                 "installed": True,
                 "filename": path.name,
@@ -587,11 +589,28 @@ class ModelService:
                 "class_names": [],
                 "error": str(exc),
             }
-        return {
+        key = (str(path), mtime)
+        if self._halfyield_cache is not None and self._halfyield_cache_key == key:
+            return self._halfyield_cache
+        try:
+            info = inspect_checkpoint(path)
+            finished = _finish_names(info, [])
+        except Exception as exc:  # noqa: BLE001
+            failed = {
+                "installed": True,
+                "filename": path.name,
+                "path": str(path),
+                "class_names": [],
+                "error": str(exc),
+            }
+            self._halfyield_cache = failed
+            self._halfyield_cache_key = key
+            return failed
+        result = {
             "installed": True,
             "filename": path.name,
             "path": str(path),
-            "bytes": path.stat().st_size,
+            "bytes": size,
             "family": finished.get("family"),
             "task": finished.get("task"),
             "architecture": finished.get("architecture") or finished.get("variant"),
@@ -601,6 +620,9 @@ class ModelService:
             "error": None,
             "meta": finished,
         }
+        self._halfyield_cache = result
+        self._halfyield_cache_key = key
+        return result
 
     def predict_roi_jpeg(
         self,

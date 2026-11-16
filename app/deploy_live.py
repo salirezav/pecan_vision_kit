@@ -20,6 +20,8 @@ ELAPSED_WINDOW = 8
 MIN_INTERVAL_SEC = 0.2
 DEFAULT_INTERVAL_SEC = 1.0
 SAFETY_MARGIN = 1.15
+# Match the Deploy page poll so most samples stay metrics-only.
+DRAW_INTERVAL_SEC = 1.0
 
 
 class DeployLiveService:
@@ -63,13 +65,19 @@ class DeployLiveService:
         self._last_elapsed_ms: int | None = None
         self._last_error: str | None = None
         self._generation = 0
+        self._last_draw_at = 0.0
+
+    def is_running(self) -> bool:
+        with self._lock:
+            return self._running
 
     def status(self) -> dict[str, Any]:
         with self._lock:
             max_hz = None
             if self._min_interval_sec and self._min_interval_sec > 0:
                 max_hz = round(1.0 / self._min_interval_sec, 3)
-            return {
+            metrics = list(self._run_metrics) if self._run_metrics else None
+            payload = {
                 "running": self._running,
                 "threshold": self._threshold,
                 "speed": self._speed,
@@ -83,7 +91,7 @@ class DeployLiveService:
                     key: (dict(val) if val is not None else None)
                     for key, val in self._frame_values.items()
                 },
-                "metrics": self._list_metrics(),
+                "metrics": metrics,
                 "pecan_ready": pecan_classes_ready(self._class_names),
                 "pecan_builtins": {
                     key: dict(val) for key, val in self._pecan_builtins.items()
@@ -96,6 +104,9 @@ class DeployLiveService:
                 "full_frame": self._roi is None,
                 "run_id": self._run_id,
             }
+        if payload["metrics"] is None:
+            payload["metrics"] = self._list_metrics()
+        return payload
 
     def start(
         self,
@@ -142,6 +153,7 @@ class DeployLiveService:
             self._run_id = str(summary.get("id") or "")
             self._running = True
             self._last_error = None
+            self._last_draw_at = 0.0
             self._generation += 1
             generation = self._generation
             self._thread = threading.Thread(
@@ -234,12 +246,14 @@ class DeployLiveService:
                 if jpeg is None:
                     time.sleep(0.2)
                     continue
+                # Encode an overlay about as often as the page polls (~1 Hz).
+                draw = (sample_started - self._last_draw_at) >= DRAW_INTERVAL_SEC
                 try:
                     result = self._predict(
                         jpeg,
                         threshold,
                         speed,
-                        draw=True,
+                        draw=draw,
                         roi=roi,
                         roi_space=roi_space,
                     )
@@ -252,6 +266,8 @@ class DeployLiveService:
                             self._last_error = str(result.get("error") or "Inference failed.")
                     time.sleep(0.5)
                     continue
+                if draw:
+                    self._last_draw_at = sample_started
                 self._ingest(result, generation)
             except Exception as exc:  # noqa: BLE001
                 with self._lock:
@@ -291,7 +307,7 @@ class DeployLiveService:
             if pecan_classes_ready(self._class_names):
                 frame_samples = result.get("pecan_samples")
                 if isinstance(frame_samples, dict):
-                    self._pecan_run = merge_run_samples(self._pecan_run, frame_samples)
+                    merge_run_samples(self._pecan_run, frame_samples)
                 self._pecan_builtins = summarize_run(self._pecan_run)
                 for mid, card in self._pecan_builtins.items():
                     history = self._histories.setdefault(mid, [])

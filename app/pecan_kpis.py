@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import math
 from typing import Any
 
@@ -46,6 +47,10 @@ def empty_frame_samples() -> dict[str, Any]:
         "exposed_kernel_ratios": [],
         "n": 0,
         "has_masks": False,
+        "exposed_sum": 0.0,
+        "exposed_sum_sq": 0.0,
+        "areas_sorted": [],
+        "exposed_sorted": [],
     }
 
 
@@ -213,35 +218,54 @@ def collect_frame_samples(
     }
 
 
+def _ensure_run_stats(run: dict[str, Any]) -> None:
+    """Fill running-stat fields when loading a legacy accumulator."""
+    if "exposed_sum" not in run or "areas_sorted" not in run or "exposed_sorted" not in run:
+        areas = [float(v) for v in (run.get("whole_pecan_areas") or []) if float(v) > 0]
+        exposed = [float(v) for v in (run.get("exposed_kernel_ratios") or [])]
+        run["areas_sorted"] = sorted(areas)
+        run["exposed_sorted"] = sorted(exposed)
+        run["exposed_sum"] = float(sum(exposed))
+        run["exposed_sum_sq"] = float(sum(v * v for v in exposed))
+    run.setdefault("exposed_sum", 0.0)
+    run.setdefault("exposed_sum_sq", 0.0)
+    run.setdefault("areas_sorted", [])
+    run.setdefault("exposed_sorted", [])
+
+
 def merge_run_samples(
     run: dict[str, Any] | None,
     frame: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """Accumulate frame samples into a run accumulator."""
-    base = {
-        "whole_pecan_areas": list((run or {}).get("whole_pecan_areas") or []),
-        "broken_kernel_area": float((run or {}).get("broken_kernel_area") or 0),
-        "exposed_kernel_ratios": list((run or {}).get("exposed_kernel_ratios") or []),
-        "n": int((run or {}).get("n") or 0),
-        "has_masks": bool((run or {}).get("has_masks")),
-    }
+    """Accumulate frame samples into a run accumulator (mutates run in place)."""
+    base = run if isinstance(run, dict) else empty_frame_samples()
+    if "whole_pecan_areas" not in base:
+        base.update(empty_frame_samples())
+    _ensure_run_stats(base)
     if not frame:
         return base
-    areas = list(frame.get("whole_pecan_areas") or [])
-    base["whole_pecan_areas"].extend(float(v) for v in areas)
-    base["broken_kernel_area"] += float(frame.get("broken_kernel_area") or 0)
-    base["exposed_kernel_ratios"].extend(
-        float(v) for v in (frame.get("exposed_kernel_ratios") or [])
+    areas = [float(v) for v in (frame.get("whole_pecan_areas") or [])]
+    exposed = [float(v) for v in (frame.get("exposed_kernel_ratios") or [])]
+    base["whole_pecan_areas"].extend(areas)
+    base["broken_kernel_area"] = float(base.get("broken_kernel_area") or 0) + float(
+        frame.get("broken_kernel_area") or 0
     )
+    base["exposed_kernel_ratios"].extend(exposed)
+    for value in areas:
+        if value > 0:
+            bisect.insort(base["areas_sorted"], value)
+    for value in exposed:
+        bisect.insort(base["exposed_sorted"], value)
+        base["exposed_sum"] = float(base["exposed_sum"]) + value
+        base["exposed_sum_sq"] = float(base["exposed_sum_sq"]) + value * value
     base["n"] = len(base["whole_pecan_areas"])
-    base["has_masks"] = base["has_masks"] or bool(frame.get("has_masks"))
+    base["has_masks"] = bool(base.get("has_masks")) or bool(frame.get("has_masks"))
     return base
 
 
-def _median(values: list[float]) -> float | None:
-    if not values:
+def _median_sorted(ordered: list[float]) -> float | None:
+    if not ordered:
         return None
-    ordered = sorted(values)
     mid = len(ordered) // 2
     if len(ordered) % 2:
         return float(ordered[mid])
@@ -251,6 +275,7 @@ def _median(values: list[float]) -> float | None:
 def summarize_run(run: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
     """Compute the three built-in KPI cards from accumulated samples."""
     run = run or empty_frame_samples()
+    _ensure_run_stats(run)
     n = int(run.get("n") or 0)
     ready = n >= MIN_PECANS
     gate = {
@@ -259,8 +284,9 @@ def summarize_run(run: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
         "needed": MIN_PECANS,
         "message": None if ready else f"insufficient data ({n} / {MIN_PECANS})",
     }
-    areas = [float(v) for v in (run.get("whole_pecan_areas") or []) if float(v) > 0]
-    exposed = [float(v) for v in (run.get("exposed_kernel_ratios") or [])]
+    areas_sorted = list(run.get("areas_sorted") or [])
+    exposed_sorted = list(run.get("exposed_sorted") or [])
+    exposed_count = len(exposed_sorted)
     has_masks = bool(run.get("has_masks"))
 
     mean_card = {
@@ -295,15 +321,17 @@ def summarize_run(run: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
         mean_card["ready"] = False
         median_card["message"] = "Needs segmentation masks"
         median_card["ready"] = False
-    elif exposed:
-        mean_v = float(sum(exposed) / len(exposed))
+    elif exposed_count:
+        mean_v = float(run["exposed_sum"]) / float(exposed_count)
         mean_card["value"] = mean_v
-        median_card["value"] = _median(exposed)
-        mean_card["detail"] = f"{len(exposed)} open pecans · N={n}"
-        median_card["detail"] = f"{len(exposed)} open pecans · N={n}"
-        if ready and len(exposed) >= 2:
-            variance = sum((v - mean_v) ** 2 for v in exposed) / (len(exposed) - 1)
-            se = math.sqrt(variance / len(exposed))
+        median_card["value"] = _median_sorted(exposed_sorted)
+        mean_card["detail"] = f"{exposed_count} open pecans · N={n}"
+        median_card["detail"] = f"{exposed_count} open pecans · N={n}"
+        if ready and exposed_count >= 2:
+            sum_sq = float(run["exposed_sum_sq"])
+            variance = (sum_sq - exposed_count * mean_v * mean_v) / (exposed_count - 1)
+            variance = max(0.0, variance)
+            se = math.sqrt(variance / exposed_count)
             half = 1.96 * se
             mean_card["ci95"] = [mean_v - half, mean_v + half]
         if not ready:
@@ -319,8 +347,8 @@ def summarize_run(run: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
         median_card["message"] = mean_card["message"]
         median_card["ready"] = False
 
-    if areas and n > 0:
-        median_area = _median(areas)
+    if areas_sorted and n > 0:
+        median_area = _median_sorted(areas_sorted)
         if median_area and median_area > 0:
             broken = float(run.get("broken_kernel_area") or 0)
             area_card["value"] = 100.0 * (broken / median_area) / float(n)
@@ -345,15 +373,3 @@ def summarize_run(run: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
         median_card["id"]: median_card,
         area_card["id"]: area_card,
     }
-
-
-def builtin_metric_defs() -> list[dict[str, Any]]:
-    return [
-        {
-            "id": mid,
-            "name": BUILTIN_NAMES[mid],
-            "builtin": True,
-            "formula": "",
-        }
-        for mid in BUILTIN_IDS
-    ]

@@ -4,7 +4,7 @@
 
 - Deploy / Keep checking no longer sleep 0.4s after every successful frame.
 - Camera frames for inference are downscaled to the active speed size before IPC.
-- Deploy live runs in metrics-only mode (no overlay JPEG/base64 each frame).
+- Deploy live draws an overlay about once per second (matching the page poll); other samples stay metrics-only.
 - Labels are cached on the loaded model; polygon area uses a tight crop scratch buffer.
 - Torch uses up to 4 threads when not recording (2 while recording).
 

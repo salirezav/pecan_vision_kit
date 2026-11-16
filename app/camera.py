@@ -85,6 +85,14 @@ class CameraService:
     _recording: bool = field(default=False, init=False, repr=False)
     _record_generation: int = field(default=0, init=False, repr=False)
     _thread: threading.Thread | None = field(default=None, init=False, repr=False)
+    _writer_thread: threading.Thread | None = field(default=None, init=False, repr=False)
+    _preview_thread: threading.Thread | None = field(default=None, init=False, repr=False)
+    _writer_pending: tuple[Any, Any, int] | None = field(default=None, init=False, repr=False)
+    _preview_pending: Any = field(default=None, init=False, repr=False)
+    _writer_busy: bool = field(default=False, init=False, repr=False)
+    _worker_wake: threading.Condition = field(
+        default_factory=threading.Condition, init=False, repr=False
+    )
     _current_file: str | None = field(default=None, init=False, repr=False)
     _frames_written: int = field(default=0, init=False, repr=False)
     _last_error: str | None = field(default=None, init=False, repr=False)
@@ -97,18 +105,33 @@ class CameraService:
             self._open_locked()
             self._running = True
             self._thread = threading.Thread(target=self._loop, name="cam-loop", daemon=True)
+            self._writer_thread = threading.Thread(
+                target=self._writer_loop, name="cam-writer", daemon=True
+            )
+            self._preview_thread = threading.Thread(
+                target=self._preview_loop, name="cam-preview", daemon=True
+            )
             self._thread.start()
+            self._writer_thread.start()
+            self._preview_thread.start()
 
     def stop(self) -> None:
         with self._lock:
             self._running = False
-            self._stop_recording_locked()
+            writer = self._detach_writer_locked()
             if self._cap is not None:
                 self._cap.release()
                 self._cap = None
-        if self._thread is not None:
-            self._thread.join(timeout=3)
-            self._thread = None
+        self._flush_and_release_writer(writer)
+        with self._worker_wake:
+            self._preview_pending = None
+            self._worker_wake.notify_all()
+        for thread in (self._thread, self._writer_thread, self._preview_thread):
+            if thread is not None:
+                thread.join(timeout=3)
+        self._thread = None
+        self._writer_thread = None
+        self._preview_thread = None
 
     def reconfigure(
         self,
@@ -122,7 +145,7 @@ class CameraService:
         was_recording = False
         with self._lock:
             was_recording = self._recording
-            self._stop_recording_locked()
+            writer = self._detach_writer_locked()
             if width is not None:
                 self.width = int(width)
             if height is not None:
@@ -138,6 +161,7 @@ class CameraService:
                 self._cap.release()
                 self._cap = None
             self._open_locked()
+        self._flush_and_release_writer(writer)
         if was_recording:
             self.start_recording()
 
@@ -174,21 +198,40 @@ class CameraService:
                 time.sleep(0.05)
                 continue
 
-            writer = None
-            generation = 0
-            encode_preview = False
             now = time.perf_counter()
             with self._lock:
                 self._frame = frame
-                if self._recording and self._writer is not None:
-                    writer = self._writer
-                    generation = self._record_generation
-                if now - self._last_preview_at >= self._preview_interval_s:
-                    encode_preview = True
+                recording = self._recording and self._writer is not None
+                writer = self._writer
+                generation = self._record_generation
+                encode_preview = now - self._last_preview_at >= self._preview_interval_s
+                if encode_preview:
                     self._last_preview_at = now
+            with self._worker_wake:
+                if recording and writer is not None:
+                    # Length-1 queue: drop unread frames so a slow write cannot
+                    # stall the next cap.read().
+                    self._writer_pending = (frame, writer, generation)
+                if encode_preview:
+                    self._preview_pending = frame
+                if (recording and writer is not None) or encode_preview:
+                    self._worker_wake.notify_all()
 
-            # Write and JPEG encode outside the lock so get_jpeg / status stay responsive.
-            if writer is not None:
+    def _writer_loop(self) -> None:
+        while True:
+            with self._worker_wake:
+                while self._running and self._writer_pending is None:
+                    self._worker_wake.wait(timeout=0.2)
+                if not self._running and self._writer_pending is None:
+                    return
+                job = self._writer_pending
+                self._writer_pending = None
+                if job is not None:
+                    self._writer_busy = True
+            if job is None:
+                continue
+            frame, writer, generation = job
+            try:
                 writer.write(frame)
                 with self._lock:
                     if (
@@ -197,14 +240,28 @@ class CameraService:
                         and self._record_generation == generation
                     ):
                         self._frames_written += 1
+            finally:
+                with self._worker_wake:
+                    self._writer_busy = False
+                    self._worker_wake.notify_all()
 
-            if encode_preview:
-                ok_jpeg, buf = cv2.imencode(
-                    ".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80]
-                )
-                if ok_jpeg:
-                    with self._lock:
-                        self._preview_jpeg = buf.tobytes()
+    def _preview_loop(self) -> None:
+        while True:
+            with self._worker_wake:
+                while self._running and self._preview_pending is None:
+                    self._worker_wake.wait(timeout=0.2)
+                if not self._running and self._preview_pending is None:
+                    return
+                frame = self._preview_pending
+                self._preview_pending = None
+            if frame is None:
+                continue
+            ok_jpeg, buf = cv2.imencode(
+                ".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80]
+            )
+            if ok_jpeg:
+                with self._lock:
+                    self._preview_jpeg = buf.tobytes()
 
     def get_jpeg(self, quality: int = 80) -> bytes | None:
         if quality == 80:
@@ -213,9 +270,10 @@ class CameraService:
             if preview is not None:
                 return preview
         with self._lock:
-            frame = None if self._frame is None else self._frame.copy()
+            frame = self._frame
         if frame is None:
             return None
+        frame = frame.copy()
         ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
         if not ok:
             return None
@@ -228,9 +286,11 @@ class CameraService:
         selected speed, which is often smaller than this bitmap.
         """
         with self._lock:
-            frame = None if self._frame is None else self._frame.copy()
+            frame = self._frame
         if frame is None:
             return None
+        # Grab loop replaces the reference; copy outside the lock.
+        frame = frame.copy()
         height, width = frame.shape[:2]
         longest = max(height, width)
         side = max(32, int(max_side or 320))
@@ -266,20 +326,31 @@ class CameraService:
 
     def stop_recording(self) -> dict[str, Any]:
         with self._lock:
-            return self._stop_recording_locked()
+            info = {
+                "file": self._current_file,
+                "frames": self._frames_written,
+                "was_recording": self._recording,
+            }
+            writer = self._detach_writer_locked()
+        self._flush_and_release_writer(writer)
+        return info
 
-    def _stop_recording_locked(self) -> dict[str, Any]:
-        info = {
-            "file": self._current_file,
-            "frames": self._frames_written,
-            "was_recording": self._recording,
-        }
-        if self._writer is not None:
-            self._writer.release()
-            self._writer = None
+    def _detach_writer_locked(self) -> Any:
+        """Stop accepting frames. Caller must flush/release the returned writer."""
         self._recording = False
         self._record_generation += 1
-        return info
+        writer = self._writer
+        self._writer = None
+        return writer
+
+    def _flush_and_release_writer(self, writer: Any) -> None:
+        with self._worker_wake:
+            self._writer_pending = None
+            self._worker_wake.notify_all()
+            while self._writer_busy:
+                self._worker_wake.wait(timeout=0.2)
+        if writer is not None:
+            writer.release()
 
     def status(self) -> dict[str, Any]:
         with self._lock:

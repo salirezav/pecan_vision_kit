@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
 from segment_inspect import STORE_DIR
@@ -11,10 +10,6 @@ from yield_measure import clip_roi_to_frame
 
 ROI_PATH = STORE_DIR / "roi.json"
 MIN_SIDE = 32
-
-
-def roi_path() -> Path:
-    return ROI_PATH
 
 
 def validate_roi(raw: Any) -> dict[str, int]:

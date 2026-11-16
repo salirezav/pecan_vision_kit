@@ -27,12 +27,6 @@ def inject_version():
     return rt.version_context()
 
 
-def create_app() -> Flask:
-    rt.init_camera()
-    rt.models.start_worker()
-    return app
-
-
 def main() -> None:
     rt.init_camera()
     rt.models.start_worker()

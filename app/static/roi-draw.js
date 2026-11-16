@@ -122,10 +122,6 @@
     this._paint(this._imageToCss(this.roi, metrics));
   };
 
-  RoiDrawer.prototype.getRoi = function () {
-    return this.roi ? { x: this.roi.x, y: this.roi.y, w: this.roi.w, h: this.roi.h } : null;
-  };
-
   RoiDrawer.prototype.refresh = function () {
     this.setRoi(this.roi);
   };
@@ -214,16 +210,6 @@
     this._paint(this._imageToCss(imageRoi, metrics));
     if (this.onChange) this.onChange(this.roi);
     if (this.onCommit) this.onCommit(this.roi);
-  };
-
-  RoiDrawer.prototype.destroy = function () {
-    if (!this.readOnly) {
-      this._overlay.removeEventListener("pointerdown", this._boundPointerDown);
-      this._overlay.removeEventListener("pointermove", this._boundPointerMove);
-      this._overlay.removeEventListener("pointerup", this._boundPointerUp);
-      this._overlay.removeEventListener("pointercancel", this._boundPointerUp);
-    }
-    if (this._overlay.parentNode) this._overlay.parentNode.removeChild(this._overlay);
   };
 
   global.RoiDrawer = RoiDrawer;

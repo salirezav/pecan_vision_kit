@@ -21,6 +21,7 @@ def worker_main(request_q: Any, response_q: Any) -> None:
     loaded_path: str | None = None
     loaded_mtime: float | None = None
     loaded_meta_sig: str | None = None
+    torch_threads: int | None = None
 
     while True:
         job = request_q.get()
@@ -37,7 +38,10 @@ def worker_main(request_q: Any, response_q: Any) -> None:
 
             cores = max(1, os.cpu_count() or 1)
             # Leave headroom for the camera grab thread while recording.
-            torch.set_num_threads(2 if recording else min(4, cores))
+            threads = 2 if recording else min(4, cores)
+            if torch_threads != threads:
+                torch.set_num_threads(threads)
+                torch_threads = threads
             weights = Path(str(job["weights_path"]))
             meta = dict(job.get("meta") or {})
             mtime = weights.stat().st_mtime
@@ -101,10 +105,6 @@ class InferClient:
     def start(self) -> None:
         with self._lock:
             self._ensure_process_locked()
-
-    def stop(self) -> None:
-        with self._lock:
-            self._stop_locked()
 
     def _stop_locked(self) -> None:
         if self._request_q is not None:

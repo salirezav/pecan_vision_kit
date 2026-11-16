@@ -60,9 +60,6 @@ class Calibration:
             "piece_mass_per_area_g_per_model_pixel2": float(self.piece_mass_per_area),
         }
 
-    def base_conf(self) -> float:
-        return float(min(self.thresholds.values()))
-
 
 def parse_calibration(raw: dict[str, Any] | None) -> Calibration:
     data = raw if isinstance(raw, dict) else {}

@@ -4,36 +4,13 @@ from __future__ import annotations
 
 import time
 
-from flask import Blueprint, Response, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, Response, jsonify, request
 
-from camera import FPS_CHOICES, RESOLUTIONS
 from convert import queue_avi_to_mp4
 import runtime as rt
 
 bp = Blueprint("camera", __name__)
 
-
-@bp.route("/settings/control", methods=["POST"])
-def settings_control():
-    name = request.form.get("name", "")
-    value = request.form.get("value", "")
-    try:
-        rt.require_cam().set_v4l_control(name, value)
-        return redirect(url_for("ui.settings_page"))
-    except Exception as exc:  # noqa: BLE001
-        return render_template(
-            "settings.html",
-            status=rt.require_cam().status(),
-            resolutions=RESOLUTIONS,
-            fps_choices=FPS_CHOICES,
-            settings=rt.settings,
-            defaults=rt.recording_default_values(),
-            controls=rt.require_cam().list_v4l_controls(),
-            preset_names=list(rt.load_presets().keys()),
-            message=None,
-            error=str(exc),
-            kit_id=rt.settings.get("kit_id", "??"),
-        )
 
 @bp.route("/api/settings/presets", methods=["GET", "POST"])
 def api_settings_presets():
@@ -75,10 +52,6 @@ def api_settings_presets():
             }
         )
     return jsonify({"ok": False, "error": "Unknown action."}), 400
-
-@bp.route("/api/v4l/controls", methods=["GET"])
-def api_v4l_controls():
-    return jsonify({"ok": True, "controls": rt.require_cam().list_v4l_controls()})
 
 @bp.route("/api/v4l/control", methods=["POST"])
 def api_v4l_control():
