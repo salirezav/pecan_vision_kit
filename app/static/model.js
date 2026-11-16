@@ -70,6 +70,7 @@
   let live = false;
   let busy = false;
   let selecting = false;
+  let deleting = false;
   let runAbort = null;
   let overrideNames = false;
   let metrics = [];
@@ -314,24 +315,24 @@
       cards.pecan_exposed_kernel_mean.ready = false;
       cards.pecan_exposed_kernel_median.message = "Needs segmentation masks";
       cards.pecan_exposed_kernel_median.ready = false;
-    } else if (ready && exposed.length) {
+    } else if (exposed.length) {
       const mean = exposed.reduce((sum, value) => sum + value, 0) / exposed.length;
       cards.pecan_exposed_kernel_mean.value = mean;
-      if (exposed.length >= 2) {
+      cards.pecan_exposed_kernel_median.value = median(exposed);
+      cards.pecan_exposed_kernel_mean.detail = exposed.length + " open pecans · N=" + n;
+      cards.pecan_exposed_kernel_median.detail = exposed.length + " open pecans · N=" + n;
+      if (ready && exposed.length >= 2) {
         const variance = exposed.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (exposed.length - 1);
         const half = 1.96 * Math.sqrt(variance / exposed.length);
         cards.pecan_exposed_kernel_mean.ci95 = [mean - half, mean + half];
       }
-      cards.pecan_exposed_kernel_mean.detail = exposed.length + " open pecans · N=" + n;
-      cards.pecan_exposed_kernel_median.value = median(exposed);
-      cards.pecan_exposed_kernel_median.detail = exposed.length + " open pecans · N=" + n;
     } else if (ready) {
       cards.pecan_exposed_kernel_mean.message = "No open pecans with kernel overlap";
       cards.pecan_exposed_kernel_mean.ready = false;
       cards.pecan_exposed_kernel_median.message = "No open pecans with kernel overlap";
       cards.pecan_exposed_kernel_median.ready = false;
     }
-    if (ready && areas.length && n > 0) {
+    if (areas.length && n > 0) {
       const medianArea = median(areas);
       if (medianArea > 0) {
         const broken = Number(run.broken_kernel_area || 0);
@@ -359,7 +360,7 @@
   }
 
   function formatBuiltinCard(card) {
-    if (!card.ready || card.value == null) {
+    if (card.value == null) {
       return {
         text: "—",
         detail: card.message || "insufficient data",
@@ -367,7 +368,9 @@
     }
     const formatted = formatMetricValue(card.value);
     let detail = card.detail || formatted.detail;
-    if (card.ci95) {
+    if (!card.ready && card.message) {
+      detail = card.message + (card.detail ? " · " + card.detail : "");
+    } else if (card.ci95) {
       detail += " · 95% CI [" + formatMetricValue(card.ci95[0]).text + ", " + formatMetricValue(card.ci95[1]).text + "]";
     }
     return { text: formatted.text, detail };
@@ -571,10 +574,58 @@
       libraryHintEl.textContent = "Saved in " + model.library_path + ". Uploading the same file name replaces that model.";
     }
     if (modelListEmptyEl) modelListEmptyEl.hidden = rows.length > 0;
+    const locked = busy || selecting || deleting;
     modelListEl.innerHTML = rows.map((row) => {
       const detail = modelDetail(row);
-      return "<li><button type=\"button\" class=\"model-pick" + (row.active ? " active" : "") + "\" data-model-id=\"" + escapeHtml(row.id) + "\" aria-pressed=\"" + (row.active ? "true" : "false") + "\"" + (busy || selecting ? " disabled" : "") + "><span class=\"model-pick-name\">" + escapeHtml(row.filename || row.id) + "</span>" + (detail ? "<span class=\"model-pick-meta\">" + escapeHtml(detail) + "</span>" : "") + "</button></li>";
+      const label = row.filename || row.id;
+      return "<li class=\"model-row\"><button type=\"button\" class=\"model-pick" + (row.active ? " active" : "") + "\" data-model-id=\"" + escapeHtml(row.id) + "\" aria-pressed=\"" + (row.active ? "true" : "false") + "\"" + (locked ? " disabled" : "") + "><span class=\"model-pick-name\">" + escapeHtml(label) + "</span>" + (detail ? "<span class=\"model-pick-meta\">" + escapeHtml(detail) + "</span>" : "") + "</button><button type=\"button\" class=\"model-remove\" data-delete-id=\"" + escapeHtml(row.id) + "\" data-delete-name=\"" + escapeHtml(label) + "\" aria-label=\"Delete " + escapeHtml(label) + "\"" + (locked ? " disabled" : "") + ">&minus;</button></li>";
     }).join("");
+  }
+
+  async function deleteModel(id, name) {
+    if (!id || deleting || selecting || busy) return;
+    const label = name || id;
+    if (!window.confirm("Delete " + label + " from this kit?")) return;
+    if (live) {
+      setLive(false);
+      if (runAbort) runAbort.abort();
+    }
+    const wasActive = Boolean(model && model.active_id === id);
+    deleting = true;
+    renderModelList();
+    syncActionButtons();
+    setMsg("Deleting " + label + "…", "");
+    try {
+      const response = await fetch("/api/model/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: id }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || "Could not delete that model.");
+      model = data;
+      if (wasActive) {
+        overrideNames = false;
+        frameMeasurements = null;
+        resetRun();
+        resetBuilder();
+        clearResult();
+      }
+      renderStatus();
+      if (!model.error) {
+        const follow = model.installed
+          ? " Now using " + (model.filename || "the remaining model") + "."
+          : "";
+        setMsg("Deleted " + label + "." + (wasActive ? follow : ""), "ok");
+      }
+    } catch (err) {
+      setMsg(err.message || String(err), "err");
+      renderModelList();
+    } finally {
+      deleting = false;
+      renderModelList();
+      syncActionButtons();
+    }
   }
 
   function clearResult() {
@@ -628,8 +679,8 @@
 
   function syncActionButtons() {
     const ready = modelReady();
-    checkBtn.disabled = busy || live || selecting || !ready;
-    startBtn.disabled = live || selecting || !ready;
+    checkBtn.disabled = busy || live || selecting || deleting || !ready;
+    startBtn.disabled = live || selecting || deleting || !ready;
     stopBtn.disabled = !live;
     renderModelList();
   }
@@ -744,6 +795,12 @@
 
   if (modelListEl) {
     modelListEl.addEventListener("click", (event) => {
+      const remove = event.target.closest("button[data-delete-id]");
+      if (remove) {
+        if (remove.disabled) return;
+        deleteModel(remove.getAttribute("data-delete-id"), remove.getAttribute("data-delete-name"));
+        return;
+      }
       const button = event.target.closest("button[data-model-id]");
       if (!button || button.disabled) return;
       selectModel(button.getAttribute("data-model-id"));

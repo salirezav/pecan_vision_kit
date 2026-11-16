@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from flask import Blueprint, jsonify, request, send_file
 
 import deploy_runs
@@ -74,6 +76,23 @@ def api_model_names():
     data = request.get_json(silent=True) or {}
     try:
         status = rt.models.update_names(str(data.get("class_names") or ""))
+        return jsonify({"ok": True, **status})
+    except ModelBusy as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 409
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@bp.route("/api/model/delete", methods=["POST"])
+def api_model_delete():
+    data = request.get_json(silent=True) or {}
+    model_id = str(data.get("id") or "")
+    try:
+        if rt.deploy_live.status().get("running") and Path(model_id).name == rt.models.weights_path().name:
+            return jsonify(
+                {"ok": False, "error": "Stop Deploy before deleting the model it is using."}
+            ), 409
+        status = rt.models.delete_model(model_id)
         return jsonify({"ok": True, **status})
     except ModelBusy as exc:
         return jsonify({"ok": False, "error": str(exc)}), 409

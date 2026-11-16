@@ -288,29 +288,38 @@ def summarize_run(run: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
         "detail": None,
     }
 
+    # Always compute a preview value when possible so Deploy charts move before
+    # the N≥200 gate. `ready` still controls the insufficient-data label / CI.
     if not has_masks:
         mean_card["message"] = "Needs segmentation masks"
         mean_card["ready"] = False
         median_card["message"] = "Needs segmentation masks"
         median_card["ready"] = False
-    elif ready and exposed:
+    elif exposed:
         mean_v = float(sum(exposed) / len(exposed))
         mean_card["value"] = mean_v
-        if len(exposed) >= 2:
+        median_card["value"] = _median(exposed)
+        mean_card["detail"] = f"{len(exposed)} open pecans · N={n}"
+        median_card["detail"] = f"{len(exposed)} open pecans · N={n}"
+        if ready and len(exposed) >= 2:
             variance = sum((v - mean_v) ** 2 for v in exposed) / (len(exposed) - 1)
             se = math.sqrt(variance / len(exposed))
             half = 1.96 * se
             mean_card["ci95"] = [mean_v - half, mean_v + half]
-        mean_card["detail"] = f"{len(exposed)} open pecans · N={n}"
-        median_card["value"] = _median(exposed)
-        median_card["detail"] = f"{len(exposed)} open pecans · N={n}"
-    elif ready:
-        mean_card["message"] = "No open pecans with kernel overlap"
+        if not ready:
+            mean_card["message"] = f"insufficient data ({n} / {MIN_PECANS})"
+            median_card["message"] = f"insufficient data ({n} / {MIN_PECANS})"
+    else:
+        mean_card["message"] = (
+            f"insufficient data ({n} / {MIN_PECANS})"
+            if not ready
+            else "No open pecans with kernel overlap"
+        )
         mean_card["ready"] = False
-        median_card["message"] = "No open pecans with kernel overlap"
+        median_card["message"] = mean_card["message"]
         median_card["ready"] = False
 
-    if ready and areas and n > 0:
+    if areas and n > 0:
         median_area = _median(areas)
         if median_area and median_area > 0:
             broken = float(run.get("broken_kernel_area") or 0)
@@ -318,11 +327,17 @@ def summarize_run(run: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
             area_card["detail"] = (
                 f"broken area {broken:.0f}px · median pecan {median_area:.0f}px · N={n}"
             )
+            if not ready:
+                area_card["message"] = f"insufficient data ({n} / {MIN_PECANS})"
         else:
             area_card["message"] = "Median pecan area is zero"
             area_card["ready"] = False
-    elif ready:
-        area_card["message"] = "No whole-pecan areas"
+    else:
+        area_card["message"] = (
+            f"insufficient data ({n} / {MIN_PECANS})"
+            if not ready
+            else "No whole-pecan areas"
+        )
         area_card["ready"] = False
 
     return {

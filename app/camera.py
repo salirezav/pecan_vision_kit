@@ -20,6 +20,18 @@ _CTRL_HEADER = re.compile(
 )
 _MENU_ITEM = re.compile(r"^\s*(\d+):\s*(.+)\s*$")
 _SKIP_CTRL_TYPES = frozenset({"rect", "bitmask", "button", "string"})
+# This fixed-lens global shutter advertises these UVC controls, but changing
+# them does not move or refocus the image. Hide them so the page only shows
+# controls that affect the picture.
+_SKIP_CTRL_NAMES = frozenset(
+    {
+        "pan_absolute",
+        "tilt_absolute",
+        "focus_absolute",
+        "focus_automatic_continuous",
+        "zoom_absolute",
+    }
+)
 
 
 RESOLUTIONS = [
@@ -305,8 +317,13 @@ class CameraService:
             nonlocal current
             if current is None:
                 return
-            if current.get("type") not in _SKIP_CTRL_TYPES:
-                controls.append(current)
+            if current.get("type") in _SKIP_CTRL_TYPES:
+                current = None
+                return
+            if current.get("name") in _SKIP_CTRL_NAMES:
+                current = None
+                return
+            controls.append(current)
             current = None
 
         for raw_line in out.splitlines():

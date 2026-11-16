@@ -435,7 +435,6 @@ def predict_frame(
             raise RuntimeError("Could not encode the result image.")
         image = "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode("ascii")
     result_mode = (_TASKS.get(task) or _TASKS["segment"])["result_mode"]
-    elapsed_ms = int((time.perf_counter() - started) * 1000)
     best = items[0] if items else None
     match = best if best and float(best.get("confidence") or 0) >= threshold else None
     counts: dict[str, int] = {}
@@ -470,6 +469,9 @@ def predict_frame(
             "n": int(pecan_samples.get("n") or 0),
             "has_masks": bool(pecan_samples.get("has_masks")),
         }
+    # Time the whole sample, including overlay encode and pecan KPI work, so
+    # Deploy's rate cap matches what the Pi actually spent.
+    elapsed_ms = int((time.perf_counter() - started) * 1000)
     payload: dict[str, Any] = {
         "ok": True,
         "elapsed_ms": elapsed_ms,

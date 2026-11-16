@@ -10,12 +10,18 @@
   <h2>Web app service</h2>
   <p>Status: <strong class="{% if service_active %}ok{% else %}err{% endif %}">{{ service_raw }}</strong></p>
   <div class="row-actions">
-    <button class="btn" data-svc="start" type="button">Start</button>
-    <button class="btn stop" data-svc="stop" type="button">Stop</button>
     <button class="btn primary" data-svc="restart" type="button">Restart</button>
     <button class="btn" data-svc="status" type="button">Refresh status</button>
   </div>
   <pre id="svc-out" class="log"></pre>
+  <h3>Start or stop from the device</h3>
+  <p>Restart on this page brings the web app back by itself. Starting or stopping <code>pecan-vision.service</code> has to be done on the device. Stopping it takes this website offline, so this page cannot start it again afterward.</p>
+  <p>SSH into the kit, or VNC in and open a terminal, then run:</p>
+  <p>Stop the web app. The site stays down until you start the service again. Saved recordings stay on disk.</p>
+  <pre class="log">sudo systemctl stop pecan-vision.service</pre>
+  <p>Start the web app. Wait a few seconds, then open <code>http://&lt;device-ip&gt;:8080/admin</code>. On the device itself, use <code>http://localhost:8080/admin</code>.</p>
+  <pre class="log">sudo systemctl start pecan-vision.service</pre>
+  <p class="hint">See whether it is running with <code>sudo systemctl status pecan-vision.service</code>.</p>
 </section>
 
 <section class="panel">
@@ -103,14 +109,18 @@ lsusb | grep -i shutter</pre>
       const action = btn.getAttribute('data-svc');
       const out = document.getElementById('svc-out');
       out.textContent = 'Working…';
-      const res = await fetch('{{ url_for("system.admin_service") }}', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: 'action=' + encodeURIComponent(action)
-      });
-      const data = await res.json();
-      out.textContent = data.output || data.error || JSON.stringify(data);
-      if (action !== 'status') setTimeout(() => location.reload(), 1200);
+      try {
+        const res = await fetch('{{ url_for("system.admin_service") }}', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+          body: 'action=' + encodeURIComponent(action)
+        });
+        const data = await res.json();
+        out.textContent = data.output || data.error || JSON.stringify(data);
+        if (action !== 'status') setTimeout(() => location.reload(), 1200);
+      } catch (err) {
+        out.textContent = 'Request failed. The service may be restarting — refresh this page in a few seconds.';
+      }
     });
   });
 </script>

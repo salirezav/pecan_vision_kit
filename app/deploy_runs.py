@@ -171,7 +171,7 @@ def append_sample(
         "pecan_broken_kernel_area_per_100",
     ):
         card = builtins.get(mid) or {}
-        if card.get("ready") and card.get("value") is not None:
+        if card.get("value") is not None:
             row.append(float(card["value"]))
         else:
             row.append("")

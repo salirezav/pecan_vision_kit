@@ -144,9 +144,13 @@ class ModelService:
         self._adopt_legacy()
         self._ensure_sidecars()
         files = self._weight_files()
-        if not files:
+        if files:
+            self._mark_seeded()
+        elif not self._seed_marker().is_file():
             self._seed_bundled()
             files = self._weight_files()
+            if files:
+                self._mark_seeded()
         if not files:
             return
         active = self._active_id()
@@ -191,6 +195,16 @@ class ModelService:
                 legacy_meta_path.unlink()
             except OSError:
                 pass
+
+    def _seed_marker(self) -> Path:
+        return self.library_dir() / ".seeded"
+
+    def _mark_seeded(self) -> None:
+        """Remember that the library has been used so a delete does not restore the bundled file."""
+        self.library_dir().mkdir(parents=True, exist_ok=True)
+        marker = self._seed_marker()
+        if not marker.exists():
+            marker.write_text("seeded\n")
 
     def _seed_bundled(self) -> None:
         bundled = self.root / "weights.pt"
@@ -371,6 +385,34 @@ class ModelService:
             raise ValueError("That model is not on this kit.")
         self._set_active(name)
         self._loaded = False
+        self._error = None
+        return self.status()
+
+    def delete_model(self, model_id: str) -> dict[str, Any]:
+        if self._infer.busy:
+            raise ModelBusy("The model is already working. Wait for it to finish.")
+        name = Path(str(model_id or "")).name
+        if not name or name != str(model_id or "").strip() or name.startswith("."):
+            raise ValueError("Choose a model from the list.")
+        if Path(name).suffix.lower() not in _WEIGHT_SUFFIXES:
+            raise ValueError("Choose a model from the list.")
+        self.ensure_seeded()
+        path = self.library_dir() / name
+        if not self._is_library_weights(path):
+            raise ValueError("That model is not on this kit.")
+        was_active = self._active_id() == name
+        path.unlink()
+        sidecar = self._sidecar(name)
+        if sidecar.is_symlink() or sidecar.is_file():
+            sidecar.unlink()
+        self._mark_seeded()
+        remaining = self._weight_files()
+        if was_active:
+            self._loaded = False
+            if remaining:
+                self._set_active(remaining[0].name)
+            elif self.active_path().is_file():
+                self.active_path().unlink()
         self._error = None
         return self.status()
 

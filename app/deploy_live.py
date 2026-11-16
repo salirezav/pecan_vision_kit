@@ -197,7 +197,12 @@ class DeployLiveService:
         self._elapsed_samples.append(int(elapsed_ms))
         if len(self._elapsed_samples) > ELAPSED_WINDOW:
             del self._elapsed_samples[0 : len(self._elapsed_samples) - ELAPSED_WINDOW]
-        floor = (max(self._elapsed_samples) / 1000.0) * SAFETY_MARGIN
+        # Use a high percentile instead of the max so one slow frame does not
+        # pin the live rate for the whole window (important on a throttled Pi).
+        ordered = sorted(self._elapsed_samples)
+        index = max(0, min(len(ordered) - 1, int(round((len(ordered) - 1) * 0.75))))
+        typical_ms = float(ordered[index])
+        floor = (typical_ms / 1000.0) * SAFETY_MARGIN
         if floor < MIN_INTERVAL_SEC:
             floor = MIN_INTERVAL_SEC
         self._min_interval_sec = floor
@@ -291,7 +296,8 @@ class DeployLiveService:
                 for mid, card in self._pecan_builtins.items():
                     history = self._histories.setdefault(mid, [])
                     value = card.get("value")
-                    if card.get("ready") and value is not None and isinstance(value, (int, float)):
+                    # Chart the preview even before N≥200 so panels are not blank.
+                    if value is not None and isinstance(value, (int, float)):
                         history.append(float(value))
                     else:
                         history.append(None)

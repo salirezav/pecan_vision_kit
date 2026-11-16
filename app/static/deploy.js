@@ -156,13 +156,15 @@
       const card = pecanBuiltins[id] || { id, name: id, ready: false, message: "insufficient data" };
       const color = COLORS[(colorOffset + index) % COLORS.length];
       const series = histories[id] || [];
-      const valueText = card.ready && card.value != null ? formatValue(card.value) : "—";
-      let detail = card.message || card.detail || "Waiting for pecan samples";
-      if (card.ready && card.ci95) {
+      const valueText = card.value != null ? formatValue(card.value) : "—";
+      let detail = card.detail || card.message || "Waiting for pecan samples";
+      if (!card.ready && card.message) {
+        detail = card.message + (card.detail ? " · " + card.detail : "");
+      } else if (card.ready && card.ci95) {
         detail = (card.detail || "") + " · 95% CI [" + formatValue(card.ci95[0]) + ", " + formatValue(card.ci95[1]) + "]";
       }
       parts.push(
-        '<article class="grafana-panel">' +
+        '<article class="grafana-panel' + (card.ready ? "" : " stale") + '">' +
         '<div class="grafana-panel-head">' +
         '<div><p class="grafana-title">' + escapeHtml(card.name || id) + " <span class=\"metric-badge\">built-in</span></p>" +
         '<p class="grafana-formula">Edge-cut pecans excluded · N ≥ 200</p></div>' +
