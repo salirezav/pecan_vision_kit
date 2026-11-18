@@ -13,6 +13,7 @@ import yaml
 
 from camera import FPS_CHOICES, RESOLUTIONS, CameraService, find_camera_device
 from deploy_live import DeployLiveService
+from review_video import ReviewVideoService
 from segment import ModelBusy, ModelService
 from segment_inspect import display_frame_max_side
 from storage import ensure_allowed_dir, list_videos
@@ -56,9 +57,16 @@ def camera_frame_size() -> tuple[int | None, int | None]:
     return width, height
 
 
-deploy_live = DeployLiveService(
-    get_jpeg=capture_infer_jpeg,
-    predict=lambda jpeg, threshold, speed, draw=True, roi=None, roi_space=None, calibration=None: models.predict_jpeg(
+def _predict_jpeg(
+    jpeg: bytes,
+    threshold: float,
+    speed: str,
+    draw: bool = True,
+    roi: dict | None = None,
+    roi_space: dict | None = None,
+    calibration: dict | None = None,
+) -> dict[str, Any]:
+    return models.predict_jpeg(
         jpeg,
         threshold,
         speed=speed,
@@ -66,12 +74,29 @@ deploy_live = DeployLiveService(
         roi=roi,
         roi_space=roi_space,
         calibration=calibration,
-    ),
-    list_metrics=lambda: models.list_metrics(),
+    )
+
+
+deploy_live = DeployLiveService(
+    get_jpeg=capture_infer_jpeg,
+    predict=_predict_jpeg,
+    list_metrics=lambda: models.list_enabled_metrics(),
+    builtin_enabled=lambda: models.builtin_enabled(),
     model_busy=ModelBusy,
     model_status=lambda: models.status(),
     get_frame_size=camera_frame_size,
     get_calibration=lambda: models.get_calibration(),
+)
+
+review_video = ReviewVideoService(
+    predict=_predict_jpeg,
+    model_status=lambda: models.status(),
+    get_calibration=lambda: models.get_calibration(),
+    list_metrics=lambda: models.list_enabled_metrics(),
+    builtin_enabled=lambda: models.builtin_enabled(),
+    videos_dir=lambda: Path(current_save_dir()),
+    model_busy=ModelBusy,
+    deploy_running=lambda: deploy_live.is_running(),
 )
 
 

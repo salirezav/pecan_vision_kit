@@ -11,6 +11,7 @@ from routes.ui import bp as ui_bp
 from routes.camera import bp as camera_bp
 from routes.library import bp as library_bp
 from routes.model import bp as model_bp
+from routes.review import bp as review_bp
 from routes.system import bp as system_bp
 
 app = Flask(__name__)
@@ -19,6 +20,7 @@ app.register_blueprint(ui_bp)
 app.register_blueprint(camera_bp)
 app.register_blueprint(library_bp)
 app.register_blueprint(model_bp)
+app.register_blueprint(review_bp)
 app.register_blueprint(system_bp)
 
 

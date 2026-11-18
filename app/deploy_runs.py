@@ -72,7 +72,14 @@ def _pecan_columns() -> list[str]:
 
 
 def _halfyield_columns() -> list[str]:
-    return ["half_area", "piece_area", "mass_share", "mass_share_run"]
+    return [
+        "half_area",
+        "piece_area",
+        "half_share",
+        "half_share_run",
+        "mass_share",
+        "mass_share_run",
+    ]
 
 
 def _header(
@@ -181,7 +188,14 @@ def append_sample(
             continue
         row.append(float(parts["value"]))
     if halfyield is not None:
-        for key in ("half_area", "piece_area", "mass_share", "mass_share_run"):
+        for key in (
+            "half_area",
+            "piece_area",
+            "half_share",
+            "half_share_run",
+            "mass_share",
+            "mass_share_run",
+        ):
             value = halfyield.get(key)
             row.append("" if value is None else float(value))
     else:

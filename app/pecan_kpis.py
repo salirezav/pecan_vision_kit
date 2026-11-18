@@ -28,11 +28,43 @@ BUILTIN_IDS = (
     "pecan_exposed_kernel_median",
     "pecan_broken_kernel_area_per_100",
 )
+HALFYIELD_BUILTIN_ID = "halfyield_half_share"
+HALFYIELD_BUILTIN_ID_LEGACY = "halfyield_mass_share"
+HALFYIELD_BUILTIN_NAME = "Half yield"
+HALFYIELD_BUILTIN_FORMULA = "half / (half + piece)"
+ALL_BUILTIN_IDS = (*BUILTIN_IDS, HALFYIELD_BUILTIN_ID)
 BUILTIN_NAMES = {
     "pecan_exposed_kernel_mean": "Exposed-kernel mean",
     "pecan_exposed_kernel_median": "Exposed-kernel median",
     "pecan_broken_kernel_area_per_100": "Broken-kernel area per 100 pecans",
+    HALFYIELD_BUILTIN_ID: HALFYIELD_BUILTIN_NAME,
 }
+
+
+def default_builtin_enabled() -> dict[str, bool]:
+    return {str(mid): True for mid in ALL_BUILTIN_IDS}
+
+
+def coalesce_builtin_enabled(raw: dict[str, Any] | None) -> dict[str, bool]:
+    """Merge saved flags onto defaults; map legacy half-yield id to the current one."""
+    builtins = default_builtin_enabled()
+    if not isinstance(raw, dict):
+        return builtins
+    for mid in ALL_BUILTIN_IDS:
+        if mid in raw:
+            builtins[str(mid)] = raw.get(mid) is not False
+        elif mid == HALFYIELD_BUILTIN_ID and HALFYIELD_BUILTIN_ID_LEGACY in raw:
+            builtins[str(mid)] = raw.get(HALFYIELD_BUILTIN_ID_LEGACY) is not False
+    return builtins
+
+
+def halfyield_builtin_metric(*, enabled: bool = True) -> dict[str, Any]:
+    return {
+        "id": HALFYIELD_BUILTIN_ID,
+        "name": HALFYIELD_BUILTIN_NAME,
+        "formula": HALFYIELD_BUILTIN_FORMULA,
+        "enabled": bool(enabled),
+    }
 
 
 def pecan_classes_ready(class_names: list[str] | None) -> bool:

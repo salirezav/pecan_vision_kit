@@ -11,7 +11,10 @@ import deploy_runs
 import roi_store
 from metric_formula import evaluate_formula, normalize_metric
 from pecan_kpis import (
+    BUILTIN_IDS,
+    HALFYIELD_BUILTIN_ID,
     empty_frame_samples,
+    halfyield_builtin_metric,
     merge_run_samples,
     pecan_classes_ready,
     summarize_run,
@@ -30,7 +33,7 @@ DEFAULT_INTERVAL_SEC = 1.0
 SAFETY_MARGIN = 1.15
 # Match the Deploy page poll so most samples stay metrics-only.
 DRAW_INTERVAL_SEC = 1.0
-HALFYIELD_METRIC_ID = "halfyield_mass_share"
+HALFYIELD_METRIC_ID = HALFYIELD_BUILTIN_ID
 
 
 class DeployLiveService:
@@ -44,6 +47,7 @@ class DeployLiveService:
         model_status: Callable[[], dict[str, Any]] | None = None,
         get_frame_size: Callable[[], tuple[int | None, int | None]] | None = None,
         get_calibration: Callable[[], dict[str, Any]] | None = None,
+        builtin_enabled: Callable[[], dict[str, bool]] | None = None,
     ) -> None:
         self._get_jpeg = get_jpeg
         self._predict = predict
@@ -52,6 +56,7 @@ class DeployLiveService:
         self._model_status = model_status or (lambda: {})
         self._get_frame_size = get_frame_size
         self._get_calibration = get_calibration or (lambda: {})
+        self._builtin_enabled = builtin_enabled or (lambda: {})
         self._lock = threading.RLock()
         self._thread: threading.Thread | None = None
         self._running = False
@@ -80,11 +85,16 @@ class DeployLiveService:
         self._halfyield = False
         self._model_id = ""
         self._yield_samples: list[tuple[float, float, float]] = []
+        self._half_share_run: float | None = None
+        self._half_share_frame: float | None = None
         self._mass_share_run: float | None = None
         self._mass_share_frame: float | None = None
         self._half_coef = calibration_store.DEFAULT_MASS_PER_AREA
         self._piece_coef = calibration_store.DEFAULT_MASS_PER_AREA
         self._calibration: dict[str, Any] = {}
+        self._builtins_on: dict[str, bool] = {}
+        self._halfyield_kpi_on = True
+        self._pecan_kpi_ids: list[str] = []
 
     def is_running(self) -> bool:
         with self._lock:
@@ -96,6 +106,10 @@ class DeployLiveService:
             if self._min_interval_sec and self._min_interval_sec > 0:
                 max_hz = round(1.0 / self._min_interval_sec, 3)
             metrics = list(self._run_metrics) if self._run_metrics else None
+            class_names = list(self._class_names)
+            halfyield = self._halfyield
+            pecan_ids = list(self._pecan_kpi_ids)
+            builtins_on = dict(self._builtins_on)
             payload = {
                 "running": self._running,
                 "threshold": self._threshold,
@@ -111,11 +125,10 @@ class DeployLiveService:
                     for key, val in self._frame_values.items()
                 },
                 "metrics": metrics,
-                "pecan_ready": (
-                    False if self._halfyield else pecan_classes_ready(self._class_names)
-                ),
                 "pecan_builtins": {
-                    key: dict(val) for key, val in self._pecan_builtins.items()
+                    key: dict(val)
+                    for key, val in self._pecan_builtins.items()
+                    if (not pecan_ids) or key in pecan_ids
                 },
                 "interval_sec": self._interval_sec,
                 "requested_interval_sec": self._requested_interval_sec,
@@ -124,21 +137,39 @@ class DeployLiveService:
                 "roi": dict(self._roi) if self._roi else None,
                 "full_frame": self._roi is None,
                 "run_id": self._run_id,
-                "halfyield": self._halfyield,
+                "halfyield": halfyield,
                 "calibration": dict(self._calibration) if self._calibration else None,
-                "mass_share": self._mass_share_run,
-                "mass_share_frame": self._mass_share_frame,
+                "half_share": self._half_share_run if self._halfyield_kpi_on else None,
+                "half_share_frame": self._half_share_frame if self._halfyield_kpi_on else None,
+                "mass_share": self._mass_share_run if self._halfyield_kpi_on else None,
+                "mass_share_frame": self._mass_share_frame if self._halfyield_kpi_on else None,
+                "builtin_enabled": builtins_on,
             }
+        if not payload["builtin_enabled"]:
+            try:
+                payload["builtin_enabled"] = dict(self._builtin_enabled() or {})
+            except Exception:  # noqa: BLE001
+                payload["builtin_enabled"] = {}
+        if not class_names:
+            model = self._model_status() or {}
+            class_names = [str(name) for name in (model.get("class_names") or [])]
+            halfyield = bool(model.get("halfyield") or is_halfyield_classes(class_names))
+            payload["halfyield"] = halfyield
+        enabled_pecan = [
+            mid
+            for mid in BUILTIN_IDS
+            if payload["builtin_enabled"].get(mid, True) is not False
+        ]
+        payload["pecan_ready"] = (
+            False if halfyield or not enabled_pecan else pecan_classes_ready(class_names)
+        )
+        halfyield_on = payload["builtin_enabled"].get(HALFYIELD_METRIC_ID, True) is not False
         if payload["metrics"] is None and not payload["halfyield"]:
             payload["metrics"] = self._list_metrics()
         if payload["halfyield"]:
-            payload["metrics"] = [
-                {
-                    "id": HALFYIELD_METRIC_ID,
-                    "name": "Est. half mass share",
-                    "formula": "mass_share(half, piece)",
-                }
-            ]
+            payload["metrics"] = (
+                [halfyield_builtin_metric(enabled=True)] if halfyield_on else []
+            )
             if payload["calibration"] is None:
                 try:
                     payload["calibration"] = self._get_calibration()
@@ -180,15 +211,21 @@ class DeployLiveService:
                 model.get("halfyield") or is_halfyield_classes(self._class_names)
             )
             self._model_id = str(model.get("active_id") or model.get("filename") or "")
+            try:
+                self._builtins_on = dict(self._builtin_enabled() or {})
+            except Exception:  # noqa: BLE001
+                self._builtins_on = {}
+            self._halfyield_kpi_on = self._builtins_on.get(HALFYIELD_METRIC_ID, True) is not False
+            self._pecan_kpi_ids = [
+                mid for mid in BUILTIN_IDS if self._builtins_on.get(mid, True) is not False
+            ]
             if self._halfyield:
                 self._speed = "accurate"
-                self._run_metrics = [
-                    {
-                        "id": HALFYIELD_METRIC_ID,
-                        "name": "Est. half mass share",
-                        "formula": "mass_share(half, piece)",
-                    }
-                ]
+                self._run_metrics = (
+                    [halfyield_builtin_metric(enabled=True)]
+                    if self._halfyield_kpi_on
+                    else []
+                )
             else:
                 self._run_metrics = list(self._list_metrics())
             try:
@@ -289,21 +326,31 @@ class DeployLiveService:
         self._last_elapsed_ms = None
         self._last_error = None
         self._yield_samples = []
+        self._half_share_run = None
+        self._half_share_frame = None
         self._mass_share_run = None
         self._mass_share_frame = None
 
     def _recompute_mass_locked(self) -> None:
+        if not self._halfyield_kpi_on:
+            self._half_share_run = None
+            self._half_share_frame = None
+            self._mass_share_run = None
+            self._mass_share_frame = None
+            self._histories.pop(HALFYIELD_METRIC_ID, None)
+            self._frame_values.pop(HALFYIELD_METRIC_ID, None)
+            return
         cal = Calibration(
             half_mass_per_area=self._half_coef,
             piece_mass_per_area=self._piece_coef,
         )
         half_int, piece_int = integrated_area_totals(self._yield_samples)
         run_share = area_share(half_int, piece_int)
+        self._half_share_run = run_share
         self._mass_share_run = cal.mass_share(run_share)
         history: list[float | None] = []
-        for index, (_t, half, piece) in enumerate(self._yield_samples):
-            frame_share = area_share(half, piece)
-            history.append(cal.mass_share(frame_share))
+        for _t, half, piece in self._yield_samples:
+            history.append(area_share(half, piece))
         # Keep only the last HISTORY points for the chart.
         if len(history) > HISTORY:
             history = history[-HISTORY:]
@@ -311,10 +358,11 @@ class DeployLiveService:
         if self._yield_samples:
             last_half = self._yield_samples[-1][1]
             last_piece = self._yield_samples[-1][2]
-            self._mass_share_frame = cal.mass_share(area_share(last_half, last_piece))
+            self._half_share_frame = area_share(last_half, last_piece)
+            self._mass_share_frame = cal.mass_share(self._half_share_frame)
         self._frame_values[HALFYIELD_METRIC_ID] = (
-            {"value": float(self._mass_share_frame)}
-            if self._mass_share_frame is not None
+            {"value": float(self._half_share_frame)}
+            if self._half_share_frame is not None
             else None
         )
 
@@ -355,11 +403,35 @@ class DeployLiveService:
                 halfyield = self._halfyield
             sample_started = time.monotonic()
             try:
-                # Fresh calibration every sample so Model-page edits apply live.
+                # Fresh calibration / enable flags every sample so Model edits apply live.
                 try:
                     calibration = self._get_calibration()
                 except Exception:  # noqa: BLE001
                     calibration = None
+                try:
+                    builtins_on = dict(self._builtin_enabled() or {})
+                except Exception:  # noqa: BLE001
+                    builtins_on = None
+                if builtins_on is not None:
+                    with self._lock:
+                        if generation == self._generation:
+                            self._builtins_on = builtins_on
+                            self._halfyield_kpi_on = (
+                                builtins_on.get(HALFYIELD_METRIC_ID, True) is not False
+                            )
+                            self._pecan_kpi_ids = [
+                                mid
+                                for mid in BUILTIN_IDS
+                                if builtins_on.get(mid, True) is not False
+                            ]
+                            if self._halfyield:
+                                self._run_metrics = (
+                                    [halfyield_builtin_metric(enabled=True)]
+                                    if self._halfyield_kpi_on
+                                    else []
+                                )
+                            else:
+                                self._run_metrics = list(self._list_metrics())
                 jpeg = self._get_jpeg("accurate" if halfyield else speed)
                 if jpeg is None:
                     time.sleep(0.2)
@@ -441,48 +513,72 @@ class DeployLiveService:
             if self._halfyield or result.get("halfyield"):
                 half_area = float(result.get("half_area") or 0)
                 piece_area = float(result.get("piece_area") or 0)
-                now_ms = time.time() * 1000.0
-                if self._yield_samples and now_ms <= self._yield_samples[-1][0]:
-                    now_ms = self._yield_samples[-1][0] + 1.0
-                self._yield_samples.append((now_ms, half_area, piece_area))
-                cal = Calibration(
-                    half_mass_per_area=self._half_coef,
-                    piece_mass_per_area=self._piece_coef,
-                )
-                frame_share = area_share(half_area, piece_area)
-                self._mass_share_frame = cal.mass_share(frame_share)
-                half_int, piece_int = integrated_area_totals(self._yield_samples)
-                run_share = area_share(half_int, piece_int)
-                self._mass_share_run = cal.mass_share(run_share)
-                history = self._histories.setdefault(HALFYIELD_METRIC_ID, [])
-                history.append(
-                    float(self._mass_share_frame)
-                    if self._mass_share_frame is not None
-                    else None
-                )
-                if len(history) > HISTORY:
-                    del history[0 : len(history) - HISTORY]
-                frame_value = (
-                    {"value": float(self._mass_share_frame)}
-                    if self._mass_share_frame is not None
-                    else None
-                )
-                self._frame_values[HALFYIELD_METRIC_ID] = frame_value
-                halfyield_payload = {
-                    "half_area": half_area,
-                    "piece_area": piece_area,
-                    "mass_share": self._mass_share_frame,
-                    "mass_share_run": self._mass_share_run,
-                }
                 metrics = self._run_metrics
-                frame_values = {HALFYIELD_METRIC_ID: frame_value}
+                frame_values: dict[str, dict[str, float] | None] = {}
                 pecan_builtins: dict[str, dict[str, Any]] = {}
+                if self._halfyield_kpi_on:
+                    now_ms = time.time() * 1000.0
+                    if self._yield_samples and now_ms <= self._yield_samples[-1][0]:
+                        now_ms = self._yield_samples[-1][0] + 1.0
+                    self._yield_samples.append((now_ms, half_area, piece_area))
+                    cal = Calibration(
+                        half_mass_per_area=self._half_coef,
+                        piece_mass_per_area=self._piece_coef,
+                    )
+                    frame_share = area_share(half_area, piece_area)
+                    self._half_share_frame = frame_share
+                    self._mass_share_frame = cal.mass_share(frame_share)
+                    half_int, piece_int = integrated_area_totals(self._yield_samples)
+                    run_share = area_share(half_int, piece_int)
+                    self._half_share_run = run_share
+                    self._mass_share_run = cal.mass_share(run_share)
+                    history = self._histories.setdefault(HALFYIELD_METRIC_ID, [])
+                    history.append(
+                        float(self._half_share_frame)
+                        if self._half_share_frame is not None
+                        else None
+                    )
+                    if len(history) > HISTORY:
+                        del history[0 : len(history) - HISTORY]
+                    frame_value = (
+                        {"value": float(self._half_share_frame)}
+                        if self._half_share_frame is not None
+                        else None
+                    )
+                    self._frame_values[HALFYIELD_METRIC_ID] = frame_value
+                    frame_values = {HALFYIELD_METRIC_ID: frame_value}
+                    halfyield_payload = {
+                        "half_area": half_area,
+                        "piece_area": piece_area,
+                        "half_share": self._half_share_frame,
+                        "half_share_run": self._half_share_run,
+                        "mass_share": self._mass_share_frame,
+                        "mass_share_run": self._mass_share_run,
+                    }
+                else:
+                    self._half_share_frame = None
+                    self._half_share_run = None
+                    self._mass_share_frame = None
+                    self._mass_share_run = None
+                    halfyield_payload = {
+                        "half_area": half_area,
+                        "piece_area": piece_area,
+                        "half_share": None,
+                        "half_share_run": None,
+                        "mass_share": None,
+                        "mass_share_run": None,
+                    }
             else:
-                if pecan_classes_ready(self._class_names):
+                if self._pecan_kpi_ids and pecan_classes_ready(self._class_names):
                     frame_samples = result.get("pecan_samples")
                     if isinstance(frame_samples, dict):
                         merge_run_samples(self._pecan_run, frame_samples)
-                    self._pecan_builtins = summarize_run(self._pecan_run)
+                    summarized = summarize_run(self._pecan_run)
+                    self._pecan_builtins = {
+                        mid: dict(card)
+                        for mid, card in summarized.items()
+                        if mid in self._pecan_kpi_ids
+                    }
                     for mid, card in self._pecan_builtins.items():
                         history = self._histories.setdefault(mid, [])
                         value = card.get("value")
@@ -493,6 +589,8 @@ class DeployLiveService:
                             history.append(None)
                         if len(history) > HISTORY:
                             del history[0 : len(history) - HISTORY]
+                else:
+                    self._pecan_builtins = {}
                 metrics = self._run_metrics or self._list_metrics()
                 frame_values = {}
                 for metric in metrics:

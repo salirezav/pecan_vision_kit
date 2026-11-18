@@ -24,10 +24,12 @@ from segment_draw import (
     _draw_semantic,
     _draw_ultralytics_instances,
     _as_numpy,
+    dominant_keep,
     draw_detection_label,
+    center_inside_roi,
     draw_inspection_polygons,
     draw_roi_rectangle,
-    overlay_thickness,
+    mark_thickness,
 )
 from segment_inspect import (
     SPEED_SIZES,
@@ -178,6 +180,7 @@ def _run_ultralytics(
     draw: bool = True,
     reference_side: int | None = None,
     class_thresholds: dict[str, float] | None = None,
+    roi: dict[str, int] | None = None,
 ) -> tuple[np.ndarray, list[dict[str, Any]], dict[str, int], list[dict[str, Any]]]:
     kwargs: dict[str, Any] = {
         "imgsz": int(infer_size),
@@ -218,6 +221,7 @@ def _run_ultralytics(
         reference_side=reference_side,
         class_thresholds=class_thresholds,
         default_threshold=threshold,
+        roi=roi,
     )
 
 
@@ -231,6 +235,7 @@ def _run_model(
     draw: bool = True,
     reference_side: int | None = None,
     class_thresholds: dict[str, float] | None = None,
+    roi: dict[str, int] | None = None,
 ) -> tuple[np.ndarray, list[dict[str, Any]], dict[str, int], list[dict[str, Any]]]:
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
     predict_kwargs: dict[str, Any] = {
@@ -260,9 +265,40 @@ def _run_model(
         if confidence < _class_cutoff(name, threshold, class_thresholds):
             continue
         keep.append(index)
+    if roi is not None:
+        keep = [
+            index
+            for index in keep
+            if center_inside_roi(tuple(float(v) for v in boxes[index][:4]), roi)
+        ]
 
-    overlay = annotated.copy() if draw else None
-    drew_mask = False
+    overlap_records: list[dict[str, Any]] = []
+    for index in keep:
+        class_id = int(class_ids[index])
+        name = labels[class_id] if 0 <= class_id < len(labels) else f"Class {class_id + 1}"
+        record: dict[str, Any] = {
+            "class": name,
+            "confidence": float(confidences[index]) if index < len(confidences) else 0.0,
+            "box": tuple(float(v) for v in boxes[index][:4]),
+        }
+        overlap_records.append(record)
+    if masks is not None:
+        mask_list = np.asarray(masks)
+        for slot, index in enumerate(keep):
+            if index >= len(mask_list):
+                continue
+            region = np.asarray(mask_list[index])
+            if region.ndim == 3:
+                region = region[0]
+            if region.shape[:2] != bgr.shape[:2]:
+                region = cv2.resize(
+                    region.astype(np.uint8),
+                    (bgr.shape[1], bgr.shape[0]),
+                    interpolation=cv2.INTER_NEAREST,
+                )
+            overlap_records[slot]["mask"] = region.astype(bool)
+    keep = [index for index, flag in zip(keep, dominant_keep(overlap_records)) if flag]
+
     union_masks: dict[str, np.ndarray] = {}
     mask_by_index: dict[int, np.ndarray] = {}
     if masks is not None:
@@ -286,13 +322,6 @@ def _run_model(
             if name not in union_masks:
                 union_masks[name] = np.zeros(bgr.shape[:2], dtype=bool)
             union_masks[name] |= region_bool
-            if draw and overlay is not None:
-                color = _COLORS[class_id % len(_COLORS)]
-                overlay[region_bool] = color
-                drew_mask = True
-    if draw and drew_mask and overlay is not None:
-        annotated = cv2.addWeighted(overlay, 0.45, annotated, 0.55, 0)
-
     for index in keep:
         class_id = int(class_ids[index])
         confidence = float(confidences[index]) if index < len(confidences) else 0.0
@@ -312,17 +341,29 @@ def _run_model(
         instances.append(instance)
         if draw:
             color = _COLORS[class_id % len(_COLORS)]
-            cv2.rectangle(
-                annotated,
-                (int(round(x1)), int(round(y1))),
-                (int(round(x2)), int(round(y2))),
-                color,
-                overlay_thickness(annotated, reference_side),
-            )
+            thickness = mark_thickness(annotated)
+            drew_outline = False
+            if index in mask_by_index:
+                region_u8 = np.ascontiguousarray(mask_by_index[index].astype(np.uint8))
+                contours, _hierarchy = cv2.findContours(
+                    region_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+                )
+                if contours:
+                    cv2.drawContours(annotated, contours, -1, color, thickness, cv2.LINE_AA)
+                    drew_outline = True
+            if not drew_outline:
+                cv2.rectangle(
+                    annotated,
+                    (int(round(x1)), int(round(y1))),
+                    (int(round(x2)), int(round(y2))),
+                    color,
+                    thickness,
+                    cv2.LINE_AA,
+                )
             draw_detection_label(
                 annotated,
-                f"{name} {confidence:.0%}",
-                (int(round(x1)), int(round(y1))),
+                name,
+                (int(round((x1 + x2) / 2.0)), int(round(y1))),
                 color,
                 reference_side,
             )
@@ -394,9 +435,8 @@ def predict_frame(
     )
 
     height, width = frame.shape[:2]
-    # Strokes were tuned on the native frame. Scale them up when the painted
-    # bitmap is larger. A crop is pasted back 1:1, so its reference shrinks
-    # with the crop and the labels keep the full-frame weight.
+    # The network always sees the full frame. An ROI only decides which
+    # detections are drawn and counted, so objects keep the same labels.
     native_side = infer_frame_max_side(meta, "accurate")
     clipped: dict[str, int] | None = None
     work = frame
@@ -416,11 +456,6 @@ def predict_frame(
         clipped = clip_roi_to_frame(mapped, width, height)
         if clipped is None:
             raise RuntimeError("The region of interest does not fit this frame.")
-        x1 = clipped["x"]
-        y1 = clipped["y"]
-        x2 = x1 + clipped["w"]
-        y2 = y1 + clipped["h"]
-        work = frame[y1:y2, x1:x2]
 
     full_long = max(height, width, 1)
     work_long = max(int(work.shape[0]), int(work.shape[1]), 1)
@@ -439,6 +474,7 @@ def predict_frame(
             draw=draw,
             reference_side=reference_side,
             class_thresholds=per_class,
+            roi=clipped,
         )
     elif family == "ultralytics":
         infer_size = yolo_infer_size(int(meta.get("resolution") or 640), speed_key)
@@ -452,6 +488,7 @@ def predict_frame(
             draw=draw,
             reference_side=reference_side,
             class_thresholds=per_class,
+            roi=clipped,
         )
     else:
         annotated, items, class_areas, instances = _run_model(
@@ -463,29 +500,14 @@ def predict_frame(
             draw=draw,
             reference_side=reference_side,
             class_thresholds=per_class,
+            roi=clipped,
         )
 
     image = None
     if draw:
+        out = annotated
         if clipped is not None:
-            composed = frame.copy()
-            x1 = clipped["x"]
-            y1 = clipped["y"]
-            x2 = x1 + clipped["w"]
-            y2 = y1 + clipped["h"]
-            if annotated.shape[0] == clipped["h"] and annotated.shape[1] == clipped["w"]:
-                composed[y1:y2, x1:x2] = annotated
-            else:
-                resized = cv2.resize(
-                    annotated,
-                    (clipped["w"], clipped["h"]),
-                    interpolation=cv2.INTER_LINEAR,
-                )
-                composed[y1:y2, x1:x2] = resized
-            draw_roi_rectangle(composed, clipped, native_side)
-            out = composed
-        else:
-            out = annotated
+            draw_roi_rectangle(out, clipped, native_side)
         ok, buf = cv2.imencode(".jpg", out, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
         if not ok:
             raise RuntimeError("Could not encode the result image.")
@@ -504,15 +526,14 @@ def predict_frame(
     if pecan_classes_ready(labels) and instances:
         if clipped is not None:
             bounds = (
-                0,
-                0,
-                int(clipped["w"]),
-                int(clipped["h"]),
+                int(clipped["x"]),
+                int(clipped["y"]),
+                int(clipped["x"]) + int(clipped["w"]),
+                int(clipped["y"]) + int(clipped["h"]),
             )
-            sample_shape = (int(work.shape[0]), int(work.shape[1]))
         else:
             bounds = (0, 0, width, height)
-            sample_shape = (height, width)
+        sample_shape = (height, width)
         pecan_samples = collect_frame_samples(
             shape=sample_shape,
             bounds=bounds,

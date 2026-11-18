@@ -8,7 +8,13 @@ from typing import Any
 import cv2
 import numpy as np
 
-from segment_draw import _COLORS, draw_detection_label, overlay_thickness
+from segment_draw import (
+    _COLORS,
+    center_inside_roi,
+    dominant_keep,
+    draw_detection_label,
+    mark_thickness,
+)
 
 
 class HailoModel:
@@ -326,6 +332,7 @@ def run_hailo(
     draw: bool = True,
     reference_side: int | None = None,
     class_thresholds: dict[str, float] | None = None,
+    roi: dict[str, int] | None = None,
 ) -> tuple[np.ndarray, list[dict[str, Any]], dict[str, int], list[dict[str, Any]]]:
     del task
     letterboxed, scale, pad_x, pad_y = _letterbox(bgr, model.input_w, model.input_h)
@@ -388,6 +395,31 @@ def run_hailo(
         ]
         items.sort(key=lambda item: item["confidence"], reverse=True)
 
+    if roi is not None:
+        boxes = [
+            box
+            for box in boxes
+            if center_inside_roi((float(box[1]), float(box[2]), float(box[3]), float(box[4])), roi)
+        ]
+
+    overlap_records = [
+        {
+            "class": labels[class_id] if 0 <= class_id < len(labels) else f"Class {class_id + 1}",
+            "confidence": float(score),
+            "box": (float(x1), float(y1), float(x2), float(y2)),
+        }
+        for class_id, x1, y1, x2, y2, score in boxes
+    ]
+    boxes = [box for box, flag in zip(boxes, dominant_keep(overlap_records)) if flag]
+    items = [
+        {
+            "class": labels[class_id] if 0 <= class_id < len(labels) else f"Class {class_id + 1}",
+            "confidence": round(float(score), 3),
+        }
+        for class_id, _x1, _y1, _x2, _y2, score in boxes
+    ]
+    items.sort(key=lambda item: item["confidence"], reverse=True)
+
     if model.postprocess == "nms" or class_thresholds:
         class_areas = {}
         for class_id, x1, y1, x2, y2, _score in boxes:
@@ -409,15 +441,15 @@ def run_hailo(
 
     annotated = bgr.copy() if draw else bgr
     if draw:
-        thickness = overlay_thickness(annotated, reference_side)
-        for class_id, x1, y1, x2, y2, score in boxes:
+        thickness = mark_thickness(annotated)
+        for class_id, x1, y1, x2, y2, _score in boxes:
             color = _COLORS[class_id % len(_COLORS)]
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, thickness)
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, thickness, cv2.LINE_AA)
             name = labels[class_id] if 0 <= class_id < len(labels) else f"Class {class_id + 1}"
             draw_detection_label(
                 annotated,
-                f"{name} {score:.0%}",
-                (x1, y1),
+                name,
+                ((x1 + x2) // 2, y1),
                 color,
                 reference_side,
             )

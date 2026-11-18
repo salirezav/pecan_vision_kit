@@ -14,7 +14,8 @@ from typing import Any
 
 import calibration_store
 from infer_worker import InferClient
-from metric_formula import formula_labels, normalize_metric, validate_formula
+from metric_formula import formula_labels, metric_enabled, normalize_metric, validate_formula
+from pecan_kpis import ALL_BUILTIN_IDS, coalesce_builtin_enabled, default_builtin_enabled
 from segment_inspect import (
     MAX_UPLOAD_BYTES,
     SPEED_SIZES,
@@ -500,26 +501,70 @@ class ModelService:
         self.meta_path().write_text(json.dumps(meta, indent=2))
         return self.status()
 
-    def list_metrics(self) -> list[dict[str, Any]]:
+    def _read_metrics_file(self) -> tuple[list[dict[str, Any]], dict[str, bool]]:
         path = self.metrics_path()
+        builtins = default_builtin_enabled()
         if not path.is_file():
-            return []
+            return [], builtins
         try:
             data = json.loads(path.read_text())
         except (OSError, json.JSONDecodeError):
-            return []
-        if not isinstance(data, list):
-            return []
+            return [], builtins
+        rows: list[Any]
+        if isinstance(data, list):
+            rows = data
+        elif isinstance(data, dict):
+            rows = data.get("metrics") if isinstance(data.get("metrics"), list) else []
+            builtins = coalesce_builtin_enabled(
+                data.get("builtin_enabled") if isinstance(data.get("builtin_enabled"), dict) else None
+            )
+        else:
+            return [], builtins
         out: list[dict[str, Any]] = []
-        for row in data:
+        for row in rows:
             if not isinstance(row, dict):
                 continue
             normalized = normalize_metric(row)
             if normalized.get("id") and normalized.get("name") and normalized.get("formula"):
                 out.append(normalized)
-        return out
+        return out, builtins
 
-    def save_metrics(self, raw: Any) -> list[dict[str, Any]]:
+    def _write_metrics_file(
+        self,
+        metrics: list[dict[str, Any]],
+        builtin_enabled: dict[str, bool],
+    ) -> None:
+        payload = {
+            "metrics": metrics,
+            "builtin_enabled": {
+                str(mid): bool(builtin_enabled.get(mid, True)) for mid in ALL_BUILTIN_IDS
+            },
+        }
+        self.store_dir.mkdir(parents=True, exist_ok=True)
+        self.metrics_path().write_text(json.dumps(payload, indent=2) + "\n")
+
+    def list_metrics(self) -> list[dict[str, Any]]:
+        metrics, _builtins = self._read_metrics_file()
+        return metrics
+
+    def list_enabled_metrics(self) -> list[dict[str, Any]]:
+        return [row for row in self.list_metrics() if metric_enabled(row)]
+
+    def builtin_enabled(self) -> dict[str, bool]:
+        _metrics, builtins = self._read_metrics_file()
+        return builtins
+
+    def is_builtin_enabled(self, metric_id: str) -> bool:
+        return bool(self.builtin_enabled().get(str(metric_id), True))
+
+    def metrics_payload(self) -> dict[str, Any]:
+        metrics, builtins = self._read_metrics_file()
+        return {"metrics": metrics, "builtin_enabled": builtins}
+
+    def save_metrics(self, raw: Any, builtin_enabled: Any | None = None) -> dict[str, Any]:
+        if isinstance(raw, dict) and "metrics" in raw:
+            builtin_enabled = raw.get("builtin_enabled", builtin_enabled)
+            raw = raw.get("metrics")
         if not isinstance(raw, list):
             raise ValueError("Send a list of metrics.")
         if len(raw) > MAX_METRICS:
@@ -556,11 +601,14 @@ class ModelService:
                     "id": metric_id,
                     "name": name,
                     "formula": formula,
+                    "enabled": bool(normalized.get("enabled", True)),
                 }
             )
-        self.store_dir.mkdir(parents=True, exist_ok=True)
-        self.metrics_path().write_text(json.dumps(cleaned, indent=2))
-        return cleaned
+        builtins = coalesce_builtin_enabled(self.builtin_enabled())
+        if isinstance(builtin_enabled, dict):
+            builtins = coalesce_builtin_enabled({**builtins, **builtin_enabled})
+        self._write_metrics_file(cleaned, builtins)
+        return {"metrics": cleaned, "builtin_enabled": builtins}
 
     def predict_jpeg(
         self,
@@ -624,6 +672,7 @@ class ModelService:
                     ).mass_share(share)
                     result["halfyield"] = True
                     result["area_share"] = share
+                    result["half_share"] = share
                     result["mass_share"] = mass
                     result["half_mass_per_area_g_per_model_pixel2"] = half_coef
                     result["piece_mass_per_area_g_per_model_pixel2"] = piece_coef

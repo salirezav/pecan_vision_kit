@@ -88,6 +88,10 @@ def api_model_delete():
     data = request.get_json(silent=True) or {}
     model_id = str(data.get("id") or "")
     try:
+        if rt.review_video.is_running():
+            return jsonify(
+                {"ok": False, "error": "Finish the video review before deleting a model."}
+            ), 409
         if rt.deploy_live.status().get("running") and Path(model_id).name == rt.models.weights_path().name:
             return jsonify(
                 {"ok": False, "error": "Stop Deploy before deleting the model it is using."}
@@ -104,6 +108,14 @@ def api_model_delete():
 def api_model_select():
     data = request.get_json(silent=True) or {}
     try:
+        if rt.review_video.is_running():
+            return jsonify(
+                {"ok": False, "error": "Finish the video review before changing models."}
+            ), 409
+        if rt.deploy_live.is_running():
+            return jsonify(
+                {"ok": False, "error": "Stop Deploy before changing models."}
+            ), 409
         status = rt.models.select_model(str(data.get("id") or ""))
         return jsonify({"ok": True, **status})
     except ModelBusy as exc:
@@ -114,16 +126,21 @@ def api_model_select():
 
 @bp.route("/api/model/metrics", methods=["GET"])
 def api_model_metrics_get():
-    return jsonify({"ok": True, "metrics": rt.models.list_metrics()})
+    return jsonify({"ok": True, **rt.models.metrics_payload()})
 
 
 @bp.route("/api/model/metrics", methods=["PUT"])
 def api_model_metrics_put():
     data = request.get_json(silent=True)
-    payload = data.get("metrics") if isinstance(data, dict) else data
     try:
-        metrics = rt.models.save_metrics(payload)
-        return jsonify({"ok": True, "metrics": metrics})
+        if isinstance(data, dict) and ("metrics" in data or "builtin_enabled" in data):
+            saved = rt.models.save_metrics(
+                data.get("metrics") if "metrics" in data else rt.models.list_metrics(),
+                builtin_enabled=data.get("builtin_enabled"),
+            )
+        else:
+            saved = rt.models.save_metrics(data)
+        return jsonify({"ok": True, **saved})
     except Exception as exc:  # noqa: BLE001
         return jsonify({"ok": False, "error": str(exc)}), 400
 
@@ -146,6 +163,11 @@ def api_model_calibration_put():
         # coefficients also recompute stored half-yield share without a new pass.
         try:
             rt.deploy_live.refresh_calibration()
+        except Exception:  # noqa: BLE001
+            pass
+        # Review treats a calibration change as a new report segment.
+        try:
+            rt.review_video.refresh_calibration()
         except Exception:  # noqa: BLE001
             pass
         return jsonify({"ok": True, "calibration": calibration})
@@ -244,6 +266,10 @@ def api_deploy_live_start():
     except (TypeError, ValueError):
         interval_sec = 1.0
     try:
+        if rt.review_video.is_running():
+            return jsonify(
+                {"ok": False, "error": "Stop Review before starting a live Deploy run."}
+            ), 409
         status = rt.models.status()
         if not status.get("installed"):
             return jsonify({"ok": False, "error": "Upload a model first."}), 400

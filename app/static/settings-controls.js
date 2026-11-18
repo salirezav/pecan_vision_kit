@@ -85,10 +85,12 @@
       if (slider && number) {
         const focused = document.activeElement === slider || document.activeElement === number;
         const pending = Boolean(debounceTimers[ctrl.name]);
-        const keepValue = pending || (focused && ctrl.name === touchedName && Number(slider.value) !== Number(sentValue));
+        const shown = displayValue(ctrl, ctrl.value);
+        const sentShown = displayValue(ctrl, sentValue);
+        const keepValue = pending || (focused && ctrl.name === touchedName && Number(slider.value) !== sentShown);
         if (!keepValue) {
-          slider.value = String(ctrl.value);
-          number.value = String(ctrl.value);
+          slider.value = String(shown);
+          number.value = String(shown);
         }
         if (document.activeElement !== slider) slider.disabled = Boolean(ctrl.inactive);
         if (document.activeElement !== number) number.disabled = Boolean(ctrl.inactive);
@@ -108,6 +110,18 @@
         select.disabled = Boolean(ctrl.inactive);
       }
     }
+  }
+
+  // The camera treats this number as the light it is correcting for, so a low
+  // value turns the picture blue and a high value turns it orange. Show the
+  // opposite, so 2800 looks warm and 6500 looks cool.
+  function displayValue(ctrl, device) {
+    const n = Number(device);
+    if (ctrl.name !== "white_balance_temperature") return n;
+    const min = Number(ctrl.min);
+    const max = Number(ctrl.max);
+    if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(n)) return n;
+    return min + max - n;
   }
 
   function scheduleApply(name, value) {
@@ -193,14 +207,17 @@
     const min = Number(ctrl.min ?? 0);
     const max = Number(ctrl.max ?? 100);
     const step = Number(ctrl.step ?? 1) || 1;
-    const value = Number(ctrl.value ?? min);
+    const value = displayValue(ctrl, Number(ctrl.value ?? min));
+    const toDevice = (shown) => displayValue(ctrl, shown);
 
     const wrap = document.createElement("div");
     wrap.className = "ctrl-range";
 
     const meta = document.createElement("div");
     meta.className = "ctrl-range-meta";
-    meta.textContent = `${min} – ${max}` + (step !== 1 ? ` (step ${step})` : "");
+    meta.textContent = ctrl.name === "white_balance_temperature"
+      ? `${min} warm – ${max} cool`
+      : `${min} – ${max}` + (step !== 1 ? ` (step ${step})` : "");
 
     const row = document.createElement("div");
     row.className = "ctrl-range-row";
@@ -230,8 +247,8 @@
       n = Math.min(max, Math.max(min, n));
       slider.value = String(n);
       number.value = String(n);
-      if (source === "live") scheduleApply(ctrl.name, n);
-      else applyControl(ctrl.name, n);
+      if (source === "live") scheduleApply(ctrl.name, toDevice(n));
+      else applyControl(ctrl.name, toDevice(n));
     };
 
     function snapToStep(n) {
@@ -248,7 +265,7 @@
       if (next === current) return;
       slider.value = String(next);
       number.value = String(next);
-      scheduleApply(ctrl.name, next);
+      scheduleApply(ctrl.name, toDevice(next));
     }
 
     function onStepKey(ev) {
@@ -262,9 +279,9 @@
 
     slider.addEventListener("input", () => {
       number.value = slider.value;
-      scheduleApply(ctrl.name, slider.value);
+      scheduleApply(ctrl.name, toDevice(slider.value));
     });
-    slider.addEventListener("change", () => applyControl(ctrl.name, slider.value));
+    slider.addEventListener("change", () => applyControl(ctrl.name, toDevice(slider.value)));
     slider.addEventListener("keydown", onStepKey);
     number.addEventListener("change", () => sync(number.value, "commit"));
     number.addEventListener("keydown", (ev) => {

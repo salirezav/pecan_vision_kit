@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}Review — Pecan Vision Kit {{ kit_id }}{% endblock %}
+{% block content %}
+<section class="review-layout">
+  <header class="review-hero">
+    <div>
+      <p class="eyebrow">VIDEO REVIEW</p>
+      <h1>Score a recording</h1>
+    </div>
+    <p id="review-status" class="review-status">Ready</p>
+  </header>
+
+  <section id="review-setup" class="panel review-setup">
+    <div class="review-setup-head">
+      <div>
+        <h2>Setup</h2>
+        <p class="hint">Pick a video, model, and optional region. Clear the region to score the whole frame.</p>
+      </div>
+      <div class="review-setup-actions">
+        <button id="btn-start" class="btn primary" type="button">Start review</button>
+      </div>
+    </div>
+    <p id="setup-msg" class="msg" aria-live="polite"></p>
+
+    <div class="review-setup-grid">
+      <div class="review-setup-media">
+        <div class="review-player-wrap">
+          <video id="review-player" class="video-player" controls playsinline></video>
+          <p id="player-label" class="msg">Select a video to play it here.</p>
+        </div>
+        <div class="review-roi-still">
+          <div class="preview-wrap" id="still-wrap">
+            <img id="still-preview" class="preview" alt="Video still for measurement region" hidden>
+            <div id="still-empty" class="result-empty">Still for drawing the measurement region.</div>
+          </div>
+          <div class="roi-controls">
+            <p class="hint">Optional region for Review only.</p>
+            <p id="roi-status" class="msg">Using the full frame.</p>
+            <p id="roi-warning" class="msg" hidden></p>
+            <div class="row-actions">
+              <button id="btn-roi-redraw" class="btn" type="button">Redraw region</button>
+              <button id="btn-roi-clear" class="btn" type="button">Clear region</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="review-setup-side">
+        <label>Video
+          <select id="video-select">
+            <option value="">Choose a video…</option>
+            {% for row in videos %}
+            <option value="{{ row.name }}">{{ row.name }} ({{ row.size_mb }} MB)</option>
+            {% endfor %}
+          </select>
+        </label>
+        <div class="review-sample-row">
+          <label>Frames / sec
+            <input id="frames-per-sec" type="number" min="0.1" max="60" step="0.1" value="1">
+          </label>
+          <label>Window (sec)
+            <input id="window-sec" type="number" min="1" max="86400" step="1" value="60">
+          </label>
+        </div>
+        <p id="fps-hint" class="hint">Sample rate cannot exceed the video’s own frame rate.</p>
+
+        <div class="review-model-block">
+          <h3 class="model-section-title">Select Model</h3>
+          <p class="hint">Same library as Model. Upload and delete stay there.</p>
+          <ul id="model-list" class="model-list" aria-label="Models on this kit"></ul>
+          <p id="model-list-empty" class="msg">No weights saved yet.</p>
+          <p id="model-status" class="msg"></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="review-session" class="review-grid" hidden>
+    <div class="panel">
+      <p class="eyebrow">INSPECTION VIEW</p>
+      <div class="preview-wrap">
+        <img id="result" class="preview" alt="Review frame" hidden>
+        <div id="result-empty" class="result-empty">Annotated frames appear here during review.</div>
+      </div>
+      <div class="transport">
+        <progress id="progress" max="100" value="0"></progress>
+        <div class="position">
+          <span id="position-label">00:00 / 00:00</span>
+          <span id="segment-note">Seeking starts a new report segment.</span>
+        </div>
+        <div class="review-buttons">
+          <button id="btn-pause" class="btn" type="button">Pause</button>
+          <button id="btn-back" class="btn" type="button">Back 5s</button>
+          <button id="btn-ahead" class="btn" type="button">Ahead 5s</button>
+          <button id="btn-prev" class="btn" type="button">Previous frame</button>
+          <button id="btn-next" class="btn" type="button">Next frame</button>
+          <button id="btn-slow" class="btn" type="button">Slow: off</button>
+          <button id="btn-finish" class="btn primary" type="button">Finish / save CSV</button>
+        </div>
+      </div>
+    </div>
+
+    <aside class="review-aside">
+      <p class="eyebrow" id="kpi-eyebrow">KPIs</p>
+      <div id="halfyield-kpis">
+        <p class="reading" id="half-share-reading">—</p>
+        <p class="metric"><span>Half yield</span><strong id="half-share">—</strong></p>
+        <p class="metric"><span>Piece share</span><strong id="piece-share">—</strong></p>
+        <p class="metric"><span>Est. half mass share</span><strong id="mass-share">—</strong></p>
+        <p class="chart-title">Half yield trend</p>
+        <svg id="chart" viewBox="0 0 320 120" role="img" aria-label="Half yield trend">
+          <line class="grid" x1="0" y1="10" x2="320" y2="10"></line>
+          <line class="grid" x1="0" y1="60" x2="320" y2="60"></line>
+          <line class="grid" x1="0" y1="110" x2="320" y2="110"></line>
+          <text x="4" y="22">100%</text>
+          <text x="4" y="64">50%</text>
+          <text x="4" y="112">0%</text>
+          <polyline id="trend" points=""></polyline>
+        </svg>
+        <p class="caption"><span>Half area / (half + piece area)</span></p>
+      </div>
+      <div id="crack-kpis" hidden>
+        <div id="pecan-cards"></div>
+        <div id="custom-cards"></div>
+      </div>
+      <div id="final-kpis" class="review-foot" hidden>
+        <h3>Final result</h3>
+        <div id="final-body"></div>
+        <p id="report-link" class="hint" hidden></p>
+      </div>
+      <p id="session-msg" class="msg" aria-live="polite"></p>
+    </aside>
+  </section>
+
+  <section class="panel">
+    <details id="calibration" class="panel calibration-panel" open>
+      <summary>Calibration</summary>
+      <p id="calibration-hint" class="hint">Per-class confidence. Changes save automatically. During a review they start a new report segment.</p>
+      <div id="calibration-sliders" class="sliders"></div>
+    </details>
+  </section>
+
+  <section class="panel deploy-history">
+    <div class="deploy-history-head">
+      <h2>Past reviews</h2>
+      <button id="btn-refresh-runs" class="btn" type="button">Refresh</button>
+    </div>
+    <div id="runs-list" class="runs-list"></div>
+  </section>
+</section>
+
+<script id="review-boot" type="application/json">{{ {"model": model, "videos": videos, "save_dir": save_dir}|tojson }}</script>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='roi-draw.js') }}"></script>
+<script src="{{ url_for('static', filename='calibration-ui.js') }}"></script>
+<script src="{{ url_for('static', filename='review.js') }}"></script>
+{% endblock %}

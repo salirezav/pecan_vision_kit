@@ -33,7 +33,8 @@
   const closeRunBtn = document.getElementById("btn-close-run");
 
   const COLORS = ["#c4a35a", "#7dcea0", "#5dade2", "#f5b041", "#af7ac5", "#e74c3c", "#48c9b0", "#f4d03f"];
-  const HALFYIELD_METRIC_ID = "halfyield_mass_share";
+  const HALFYIELD_METRIC_ID = "halfyield_half_share";
+  const HALFYIELD_METRIC_ID_LEGACY = "halfyield_mass_share";
 
   let model = null;
   let metrics = [];
@@ -48,8 +49,32 @@
   let runId = null;
   let roiDrawer = null;
   let halfyield = false;
-  let massShare = null;
-  let massShareFrame = null;
+  let halfShare = null;
+  let halfShareFrame = null;
+  let builtinEnabled = {
+    pecan_exposed_kernel_mean: true,
+    pecan_exposed_kernel_median: true,
+    pecan_broken_kernel_area_per_100: true,
+    halfyield_half_share: true,
+  };
+
+  function mergeBuiltinEnabled(raw) {
+    if (!raw || typeof raw !== "object") return;
+    builtinEnabled = Object.assign({}, builtinEnabled, raw);
+    if (
+      raw[HALFYIELD_METRIC_ID] === undefined &&
+      raw[HALFYIELD_METRIC_ID_LEGACY] !== undefined
+    ) {
+      builtinEnabled[HALFYIELD_METRIC_ID] = raw[HALFYIELD_METRIC_ID_LEGACY] !== false;
+    }
+  }
+
+  function isBuiltinOn(id) {
+    if (id === HALFYIELD_METRIC_ID && builtinEnabled[id] === undefined) {
+      return builtinEnabled[HALFYIELD_METRIC_ID_LEGACY] !== false;
+    }
+    return builtinEnabled[id] !== false;
+  }
 
   const calibration = window.CalibrationUi
     ? window.CalibrationUi.bind({
@@ -175,7 +200,7 @@
       "pecan_exposed_kernel_mean",
       "pecan_exposed_kernel_median",
       "pecan_broken_kernel_area_per_100",
-    ];
+    ].filter((id) => isBuiltinOn(id));
     ids.forEach((id, index) => {
       const card = pecanBuiltins[id] || { id, name: id, ready: false, message: "insufficient data" };
       const color = COLORS[(colorOffset + index) % COLORS.length];
@@ -209,39 +234,50 @@
     metaLive.textContent = live ? "Live" : (runFrames ? "Stopped" : "Idle");
 
     if (isHalfyield()) {
+      if (!isBuiltinOn(HALFYIELD_METRIC_ID)) {
+        metaMetrics.textContent = "0";
+        noteEl.textContent = "Half yield is disabled on the Model page.";
+        gridEl.innerHTML = '<div class="grafana-empty">Enable Half yield on the Model page to chart it here.</div>';
+        return;
+      }
       metaMetrics.textContent = "1";
       const color = COLORS[0];
-      const series = histories[HALFYIELD_METRIC_ID] || [];
-      const runText = formatPercent(massShare);
-      const frame = frameValues[HALFYIELD_METRIC_ID];
+      const series = histories[HALFYIELD_METRIC_ID] || histories[HALFYIELD_METRIC_ID_LEGACY] || [];
+      const runText = formatPercent(halfShare);
+      const frame = frameValues[HALFYIELD_METRIC_ID] || frameValues[HALFYIELD_METRIC_ID_LEGACY];
       const frameText = frame && frame.value != null
         ? formatPercent(frame.value)
-        : formatPercent(massShareFrame);
+        : formatPercent(halfShareFrame);
       noteEl.textContent = live
-        ? "Half-yield mass share updating on each sample."
+        ? "Half yield updating on each sample."
         : (runFrames
           ? "Last half-yield run is still on the chart. Start again for a new series."
           : "Press Start live run to fill the half-yield chart.");
       gridEl.innerHTML =
         '<article class="grafana-panel">' +
         '<div class="grafana-panel-head">' +
-        '<div><p class="grafana-title">Est. half mass share <span class="metric-badge">built-in</span></p>' +
-        '<p class="grafana-formula">mass_share(half, piece)</p></div>' +
+        '<div><p class="grafana-title">Half yield <span class="metric-badge">built-in</span></p>' +
+        '<p class="grafana-formula">half / (half + piece)</p></div>' +
         '<p class="grafana-big" style="color:' + color + '">' + escapeHtml(runText) + "</p>" +
         "</div>" +
         chartSvg(series.map((value) => (value == null ? null : value * 100)), color) +
         '<div class="grafana-foot">' +
         "<span>This frame <strong>" + escapeHtml(frameText) + "</strong></span>" +
-        "<span>Time-integrated mass share for the run</span>" +
+        "<span>Time-integrated half yield for the run</span>" +
         "</div></article>";
       return;
     }
 
-    const panelCount = metrics.length + (pecanReady ? 3 : 0);
+    const enabledMetrics = metrics.filter((metric) => metric && metric.enabled !== false);
+    const pecanCount = pecanReady
+      ? ["pecan_exposed_kernel_mean", "pecan_exposed_kernel_median", "pecan_broken_kernel_area_per_100"]
+        .filter((id) => isBuiltinOn(id)).length
+      : 0;
+    const panelCount = enabledMetrics.length + pecanCount;
     metaMetrics.textContent = String(panelCount);
     const parts = [];
     let colorOffset = renderBuiltinPanels(parts, 0);
-    metrics.forEach((metric, index) => {
+    enabledMetrics.forEach((metric, index) => {
       const normalized = normalizeMetric(metric);
       const stale = metricIsStale(normalized);
       const color = COLORS[(colorOffset + index) % COLORS.length];
@@ -272,8 +308,8 @@
     });
 
     if (!parts.length) {
-      noteEl.textContent = "No metrics yet. Open Model, save a formula, then come back here.";
-      gridEl.innerHTML = '<div class="grafana-empty">Metrics you save on the Model page appear here as live charts.</div>';
+      noteEl.textContent = "No enabled metrics. Open Model, enable a KPI or save a formula, then come back here.";
+      gridEl.innerHTML = '<div class="grafana-empty">Enabled metrics from the Model page appear here as live charts.</div>';
       return;
     }
     noteEl.textContent = live
@@ -368,8 +404,13 @@
     pecanReady = Boolean(data.pecan_ready);
     metrics = data.metrics || metrics;
     halfyield = Boolean(data.halfyield || (data.model && data.model.halfyield));
-    massShare = data.mass_share != null ? Number(data.mass_share) : null;
-    massShareFrame = data.mass_share_frame != null ? Number(data.mass_share_frame) : null;
+    halfShare = data.half_share != null
+      ? Number(data.half_share)
+      : (data.area_share != null ? Number(data.area_share) : null);
+    halfShareFrame = data.half_share_frame != null
+      ? Number(data.half_share_frame)
+      : (data.area_share != null ? Number(data.area_share) : null);
+    mergeBuiltinEnabled(data.builtin_enabled);
     if (data.model) model = data.model;
     if (data.calibration && model) model.calibration = data.calibration;
     if (data.speed && speedEl && document.activeElement !== speedEl) {

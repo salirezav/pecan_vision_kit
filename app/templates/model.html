@@ -16,8 +16,15 @@
     </div>
 
     <div class="model-side">
-      <section class="panel model-panel" aria-labelledby="model-panel-title">
-        <h2 id="model-panel-title" class="model-section-title">Model</h2>
+      <section class="panel model-panel">
+        <details class="model-accordion" open>
+        <summary id="model-panel-title" class="model-section-title">
+          <span class="model-summary-line">
+            <span class="model-summary-label">Select Model</span>
+            <span id="model-selected-name" class="model-selected-name"></span>
+          </span>
+          <span id="model-selected-tip" class="model-selected-tip" role="tooltip" aria-hidden="true"></span>
+        </summary>
         <p class="hint">Pick a saved weights file to see what it is. Half-yield and Crack Analyst each keep their own calibration. Open <a href="{{ url_for('ui.deploy_page') }}">Deploy</a> for live charts.</p>
         <div class="model-library">
           <p id="model-library-hint" class="hint">Uploaded weights stay on this kit. Select one to use for inference.</p>
@@ -46,10 +53,11 @@
             <button id="btn-names" class="btn" type="button">Save names</button>
           </div>
         </form>
+        </details>
       </section>
 
       <section class="panel model-panel model-check" aria-labelledby="check-panel-title">
-        <h2 id="check-panel-title" class="model-section-title">Check</h2>
+        <h2 id="check-panel-title" class="model-section-title">Check &amp; Optimize Model</h2>
         <p class="hint">Run the selected model on the live camera.</p>
         <details id="calibration" class="panel calibration-panel">
           <summary>Calibration</summary>
@@ -75,8 +83,10 @@
 
         <div class="big-actions">
           <button id="btn-check" class="btn start" type="button">Check this frame</button>
-          <button id="btn-start" class="btn" type="button">Keep checking</button>
-          <button id="btn-stop" class="btn stop" type="button" disabled>Stop checking</button>
+          <div class="check-split" role="group" aria-label="Keep checking">
+            <button id="btn-start" class="btn keep" type="button">Keep checking</button>
+            <button id="btn-stop" class="btn stop" type="button" disabled>Stop checking</button>
+          </div>
         </div>
         <p id="msg" class="msg" aria-live="polite"></p>
         <div id="counts" class="class-list"></div>
@@ -92,8 +102,9 @@
     <p id="metrics-note" class="hint"></p>
     <div id="metrics-list" class="metrics-list"></div>
     <form id="metric-form" class="metric-form">
+      <h3 class="metric-form-title">Create custom formula</h3>
       <label class="wide">Name
-        <input id="metric-name" type="text" maxlength="80" placeholder="Untouched rate" autocomplete="off">
+        <input id="metric-name" type="text" maxlength="80" placeholder="Pick a name for this formula/KPI you are building" autocomplete="off">
       </label>
       <label class="wide">Formula
         <div class="metric-formula-wrap">
@@ -103,7 +114,15 @@
           <ul id="metric-formula-suggest" class="metric-formula-suggest" hidden></ul>
         </div>
       </label>
-      <p id="metric-formula-hint" class="hint">Use count(Class) or area(Class) with + − * / and parentheses. Type a class name after count( or area( to pick from suggestions.</p>
+      <div class="metric-formula-help">
+        <p id="metric-formula-hint" class="hint">Use count(Class) or area(Class) with + − * / and parentheses. Type a class name after count( or area( to pick from suggestions.</p>
+        <p class="metric-examples-label">Examples</p>
+        <ul class="metric-formula-examples">
+          <li><code>count(pecan_uncracked)</code> — how many of one class</li>
+          <li><code>100 * count(pecan_uncracked) / (count(pecan_uncracked) + count(pecan_hairline))</code> — one class as a percent of two classes</li>
+          <li><code>area(kernel_broken) / (area(kernel_broken) + area(kernel_half))</code> — one class’s pixel area divided by the area of two classes</li>
+        </ul>
+      </div>
       <p id="metric-formula" class="metric-formula" hidden></p>
       <div class="row-actions">
         <button id="btn-metric-save" class="btn primary" type="submit">Save metric</button>

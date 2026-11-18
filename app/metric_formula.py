@@ -32,14 +32,23 @@ def ratio_to_formula(measure: str, numerator: list[str], denominator: list[str])
     return f"{side(numerator)} / {side(denominator)}"
 
 
+def metric_enabled(row: dict[str, Any] | None) -> bool:
+    """True unless enabled is explicitly false."""
+    if not isinstance(row, dict):
+        return True
+    return row.get("enabled") is not False
+
+
 def normalize_metric(row: dict[str, Any]) -> dict[str, Any]:
     """Return a metric dict with a formula, migrating legacy ratio fields."""
+    enabled = metric_enabled(row)
     formula = str(row.get("formula") or "").strip()
     if formula:
         return {
             "id": str(row.get("id") or ""),
             "name": str(row.get("name") or "").strip(),
             "formula": formula,
+            "enabled": enabled,
         }
     measure = str(row.get("measure") or "count").strip().lower()
     numerator = [str(name) for name in (row.get("numerator") or []) if str(name).strip()]
@@ -49,11 +58,13 @@ def normalize_metric(row: dict[str, Any]) -> dict[str, Any]:
             "id": str(row.get("id") or ""),
             "name": str(row.get("name") or "").strip(),
             "formula": ratio_to_formula(measure, numerator, denominator),
+            "enabled": enabled,
         }
     return {
         "id": str(row.get("id") or ""),
         "name": str(row.get("name") or "").strip(),
         "formula": formula,
+        "enabled": enabled,
     }
 
 

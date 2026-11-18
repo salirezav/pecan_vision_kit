@@ -19,6 +19,8 @@
   const libraryHintEl = document.getElementById("model-library-hint");
   const modelListEl = document.getElementById("model-list");
   const modelListEmptyEl = document.getElementById("model-list-empty");
+  const selectedNameEl = document.getElementById("model-selected-name");
+  const selectedTipEl = document.getElementById("model-selected-tip");
   const kindEl = document.getElementById("model-kind");
   const doesEl = document.getElementById("model-does");
   const factsEl = document.getElementById("model-facts");
@@ -51,12 +53,15 @@
         onChange: (record) => {
           if (model) model.calibration = record;
           if (isHalfyield() && yieldSamples.length) {
-            recomputeYieldMass();
+            recomputeYieldShare();
             renderMetrics();
           }
         },
       })
     : null;
+
+  const HALFYIELD_METRIC_ID = "halfyield_half_share";
+  const HALFYIELD_METRIC_ID_LEGACY = "halfyield_mass_share";
 
   const PECAN_REQUIRED = [
     "pecan_uncracked",
@@ -95,39 +100,61 @@
   let pecanRun = emptyPecanRun();
   let suggestIndex = -1;
   let yieldSamples = [];
-  let massShareFrame = null;
-  let massShareRun = null;
+  let halfShareFrame = null;
+  let halfShareRun = null;
   let halfAreaFrame = 0;
   let pieceAreaFrame = 0;
+  let builtinEnabled = {
+    pecan_exposed_kernel_mean: true,
+    pecan_exposed_kernel_median: true,
+    pecan_broken_kernel_area_per_100: true,
+    halfyield_half_share: true,
+  };
+
+  function mergeBuiltinEnabled(raw) {
+    if (!raw || typeof raw !== "object") return;
+    builtinEnabled = Object.assign({}, builtinEnabled, raw);
+    if (
+      raw[HALFYIELD_METRIC_ID] === undefined &&
+      raw[HALFYIELD_METRIC_ID_LEGACY] !== undefined
+    ) {
+      builtinEnabled[HALFYIELD_METRIC_ID] = raw[HALFYIELD_METRIC_ID_LEGACY] !== false;
+    }
+  }
+
+  function isMetricEnabled(metric) {
+    return !metric || metric.enabled !== false;
+  }
+
+  function isBuiltinOn(id) {
+    if (id === HALFYIELD_METRIC_ID && builtinEnabled[id] === undefined) {
+      return builtinEnabled[HALFYIELD_METRIC_ID_LEGACY] !== false;
+    }
+    return builtinEnabled[id] !== false;
+  }
+
+  function anyPecanBuiltinOn() {
+    return (
+      isBuiltinOn("pecan_exposed_kernel_mean") ||
+      isBuiltinOn("pecan_exposed_kernel_median") ||
+      isBuiltinOn("pecan_broken_kernel_area_per_100")
+    );
+  }
+
+  function enableToggleButton(enabled) {
+    return enabled
+      ? "<button class=\"btn\" type=\"button\" data-action=\"disable\">Disable</button>"
+      : "<button class=\"btn primary\" type=\"button\" data-action=\"enable\">Enable</button>";
+  }
 
   function isHalfyield() {
     return Boolean(model && model.halfyield);
-  }
-
-  function massCoefficients() {
-    const record = (calibration && calibration.current()) || (model && model.calibration) || {};
-    const half = Number(record.half_mass_per_area_g_per_model_pixel2);
-    const piece = Number(record.piece_mass_per_area_g_per_model_pixel2);
-    return {
-      half: Number.isFinite(half) && half > 0 ? half : 0.001,
-      piece: Number.isFinite(piece) && piece > 0 ? piece : 0.001,
-    };
   }
 
   function areaShare(half, piece) {
     const total = Number(half) + Number(piece);
     if (!(total > 0)) return null;
     return Number(half) / total;
-  }
-
-  function massShareFromArea(share) {
-    if (share == null || !Number.isFinite(share)) return null;
-    const coef = massCoefficients();
-    const half = share * coef.half;
-    const piece = (1 - share) * coef.piece;
-    const total = half + piece;
-    if (!(total > 0)) return null;
-    return half / total;
   }
 
   function integratedYieldShare(samples) {
@@ -147,9 +174,9 @@
     return areaShare(halfIntegral, pieceIntegral);
   }
 
-  function recomputeYieldMass() {
-    massShareFrame = massShareFromArea(areaShare(halfAreaFrame, pieceAreaFrame));
-    massShareRun = massShareFromArea(integratedYieldShare(yieldSamples));
+  function recomputeYieldShare() {
+    halfShareFrame = areaShare(halfAreaFrame, pieceAreaFrame);
+    halfShareRun = integratedYieldShare(yieldSamples);
   }
 
   function formatPercent(value) {
@@ -455,19 +482,29 @@
     const cards = summarizePecanRun(pecanRun);
     Object.keys(cards).forEach((id) => {
       const card = cards[id];
-      const shown = formatBuiltinCard(card);
+      const enabled = isBuiltinOn(id);
+      const shown = enabled
+        ? formatBuiltinCard(card)
+        : { text: "—", detail: "Disabled · not calculated" };
       htmlParts.push(
-        "<article class=\"metric-card builtin\" data-builtin=\"" + escapeHtml(id) + "\">" +
+        "<article class=\"metric-card builtin" + (enabled ? "" : " disabled") +
+        "\" data-builtin=\"" + escapeHtml(id) + "\">" +
         "<div class=\"metric-card-head\">" +
         "<div><p class=\"metric-card-name\">" + escapeHtml(card.name) +
-        "<span class=\"metric-badge\">built-in</span></p>" +
+        "<span class=\"metric-badge\">built-in</span>" +
+        (enabled ? "" : "<span class=\"metric-badge\">off</span>") +
+        "</p>" +
         "<p class=\"metric-card-formula\">Edge-cut pecans excluded · N ≥ " + MIN_PECANS + "</p></div>" +
+        "<div class=\"metric-card-actions\">" + enableToggleButton(enabled) + "</div>" +
         "</div>" +
         "<dl class=\"metric-values\">" +
         "<div class=\"metric-value\"><dt>This run</dt><dd>" + escapeHtml(shown.text) +
         "<span class=\"metric-detail\">" + escapeHtml(shown.detail) + "</span></dd></div>" +
-        "<div class=\"metric-value\"><dt>Sample size</dt><dd>" + escapeHtml(String(card.n || 0)) +
-        "<span class=\"metric-detail\">whole pecans kept</span></dd></div>" +
+        "<div class=\"metric-value\"><dt>Sample size</dt><dd>" +
+        escapeHtml(enabled ? String(card.n || 0) : "—") +
+        "<span class=\"metric-detail\">" +
+        (enabled ? "whole pecans kept" : "Enable to calculate") +
+        "</span></dd></div>" +
         "</dl></article>"
       );
     });
@@ -483,23 +520,32 @@
 
     if (isHalfyield()) {
       metricsNote.textContent =
-        "Half-yield uses a fixed estimated half mass share. Shell and obscured are confidence-gated and left out of the formula. Tune mass / area in Calibration.";
-      const frameText = formatPercent(massShareFrame);
-      const runText = formatPercent(massShareRun);
-      const runDetail = runFrames
-        ? "Time-integrated mass share · " + runFrames + " frame" + (runFrames === 1 ? "" : "s")
-        : "Start Keep checking to accumulate a run";
+        "Half yield is half area / (half + piece area), time-integrated over the run. Shell and obscured stay out. Enable or disable it below.";
+      const enabled = isBuiltinOn(HALFYIELD_METRIC_ID);
+      const frameText = enabled ? formatPercent(halfShareFrame) : "—";
+      const runText = enabled ? formatPercent(halfShareRun) : "—";
+      const runDetail = !enabled
+        ? "Disabled · not calculated"
+        : (runFrames
+          ? "Time-integrated half yield · " + runFrames + " frame" + (runFrames === 1 ? "" : "s")
+          : "Start Keep checking to accumulate a run");
       metricsList.innerHTML =
-        "<article class=\"metric-card builtin\">" +
+        "<article class=\"metric-card builtin" + (enabled ? "" : " disabled") +
+        "\" data-builtin=\"" + HALFYIELD_METRIC_ID + "\">" +
         "<div class=\"metric-card-head\">" +
-        "<div><p class=\"metric-card-name\">Est. half mass share" +
-        "<span class=\"metric-badge\">built-in</span></p>" +
-        "<p class=\"metric-card-formula\">mass_share(half, piece)</p></div>" +
+        "<div><p class=\"metric-card-name\">Half yield" +
+        "<span class=\"metric-badge\">built-in</span>" +
+        (enabled ? "" : "<span class=\"metric-badge\">off</span>") +
+        "</p>" +
+        "<p class=\"metric-card-formula\">half / (half + piece)</p></div>" +
+        "<div class=\"metric-card-actions\">" + enableToggleButton(enabled) + "</div>" +
         "</div>" +
         "<dl class=\"metric-values\">" +
         "<div class=\"metric-value\"><dt>This frame</dt><dd>" + escapeHtml(frameText) +
         "<span class=\"metric-detail\">" +
-        (massShareFrame == null ? "No half or piece area in this frame" : "From this frame’s half and piece areas") +
+        (!enabled
+          ? "Enable to calculate"
+          : (halfShareFrame == null ? "No half or piece area in this frame" : "From this frame’s half and piece areas")) +
         "</span></dd></div>" +
         "<div class=\"metric-value\"><dt>This run</dt><dd>" + escapeHtml(runText) +
         "<span class=\"metric-detail\">" + escapeHtml(runDetail) + "</span></dd></div>" +
@@ -512,36 +558,47 @@
       metricsNote.textContent = "Save class names on the model before building a metric.";
     } else if (pecanClassesReady()) {
       metricsNote.textContent =
-        "Write a formula with count(Class) or area(Class). This class set also unlocks three built-in pecan KPIs that need per-pecan geometry.";
+        "Enable or disable any KPI. Built-in pecan KPIs need per-pecan geometry; custom formulas use count(Class) or area(Class).";
     } else {
       metricsNote.textContent =
-        "Write a formula with count(Class) or area(Class). Keep checking accumulates class totals across frames, then evaluates the formula on those sums.";
+        "Enable or disable any KPI. Keep checking accumulates class totals across frames, then evaluates enabled formulas on those sums.";
     }
 
     const parts = [];
     renderBuiltinCards(parts);
     metrics.forEach((metric) => {
       const normalized = normalizeMetric(metric);
+      const enabled = isMetricEnabled(metric);
       const stale = metricIsStale(normalized);
       const formula = normalized.formula || "";
-      const frame = stale ? null : evaluateMetric(normalized, frameMeasurements);
-      const run = stale ? null : evaluateMetric(normalized, runFrames ? runSums : null);
-      const frameText = frame ? frame.text : "—";
-      const frameDetail = stale
-        ? "Labels missing from this model"
-        : (frame ? frame.detail : "Check a frame to fill this in");
-      const runText = run ? run.text : "—";
-      const runDetail = stale
-        ? "Labels missing from this model"
-        : (runFrames
-          ? runDetailWithFrames(run)
-          : "Start Keep checking to accumulate a run");
+      const frame = enabled && !stale ? evaluateMetric(normalized, frameMeasurements) : null;
+      const run = enabled && !stale ? evaluateMetric(normalized, runFrames ? runSums : null) : null;
+      const frameText = enabled ? (frame ? frame.text : "—") : "—";
+      const frameDetail = !enabled
+        ? "Disabled · not calculated"
+        : (stale
+          ? "Labels missing from this model"
+          : (frame ? frame.detail : "Check a frame to fill this in"));
+      const runText = enabled ? (run ? run.text : "—") : "—";
+      const runDetail = !enabled
+        ? "Disabled · not calculated"
+        : (stale
+          ? "Labels missing from this model"
+          : (runFrames
+            ? runDetailWithFrames(run)
+            : "Start Keep checking to accumulate a run"));
       parts.push(
-        "<article class=\"metric-card" + (stale ? " stale" : "") + "\" data-id=\"" + escapeHtml(metric.id) + "\">" +
+        "<article class=\"metric-card" +
+        (stale ? " stale" : "") +
+        (enabled ? "" : " disabled") +
+        "\" data-id=\"" + escapeHtml(metric.id) + "\">" +
         "<div class=\"metric-card-head\">" +
-        "<div><p class=\"metric-card-name\">" + escapeHtml(normalized.name) + "</p>" +
+        "<div><p class=\"metric-card-name\">" + escapeHtml(normalized.name) +
+        (enabled ? "" : "<span class=\"metric-badge\">off</span>") +
+        "</p>" +
         "<p class=\"metric-card-formula\">" + escapeHtml(formula) + "</p></div>" +
         "<div class=\"metric-card-actions\">" +
+        enableToggleButton(enabled) +
         "<button class=\"btn\" type=\"button\" data-action=\"edit\">Edit</button>" +
         "<button class=\"btn\" type=\"button\" data-action=\"delete\">Delete</button>" +
         "</div></div>" +
@@ -572,8 +629,8 @@
     runFrames = 0;
     pecanRun = emptyPecanRun();
     yieldSamples = [];
-    massShareFrame = null;
-    massShareRun = null;
+    halfShareFrame = null;
+    halfShareRun = null;
     halfAreaFrame = 0;
     pieceAreaFrame = 0;
     renderMetrics();
@@ -594,19 +651,36 @@
     const data = await response.json();
     if (!data.ok) throw new Error(data.error || "Could not read metrics.");
     metrics = data.metrics || [];
+    mergeBuiltinEnabled(data.builtin_enabled);
     renderMetrics();
   }
 
-  async function persistMetrics(next) {
+  async function persistMetrics(next, nextBuiltins) {
     const response = await fetch("/api/model/metrics", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ metrics: next }),
+      body: JSON.stringify({
+        metrics: next,
+        builtin_enabled: nextBuiltins || builtinEnabled,
+      }),
     });
     const data = await response.json();
     if (!response.ok || !data.ok) throw new Error(data.error || "Could not save metrics.");
     metrics = data.metrics || [];
+    mergeBuiltinEnabled(data.builtin_enabled);
     renderMetrics();
+  }
+
+  async function setBuiltinEnabled(id, enabled) {
+    const next = Object.assign({}, builtinEnabled, { [id]: Boolean(enabled) });
+    await persistMetrics(metrics, next);
+  }
+
+  async function setMetricEnabled(id, enabled) {
+    const next = metrics.map((row) =>
+      row.id === id ? Object.assign({}, row, { enabled: Boolean(enabled) }) : row
+    );
+    await persistMetrics(next, builtinEnabled);
   }
 
   function renderStatus() {
@@ -656,9 +730,29 @@
     if (model.error) {
       setMsg(model.error, "err");
     }
+    renderSelectedSummary();
     syncActionButtons();
     renderMetrics();
     renderModelList();
+  }
+
+  function renderSelectedSummary() {
+    if (!selectedNameEl || !selectedTipEl) return;
+    const installed = Boolean(model && model.installed);
+    const filename = installed ? (model.filename || "model") : "";
+    selectedNameEl.textContent = filename;
+    const names = installed ? (model.class_names || []) : [];
+    const colors = (model && model.class_colors) || [];
+    if (!names.length) {
+      selectedTipEl.classList.remove("is-ready");
+      selectedTipEl.innerHTML = "";
+      return;
+    }
+    selectedTipEl.classList.add("is-ready");
+    selectedTipEl.innerHTML = "<p>Classes</p><ul>" + names.map((name, index) => {
+      const color = colors[index] || "#c4a35a";
+      return "<li><span class=\"swatch\" style=\"background:" + color + "\"></span>" + escapeHtml(name) + "</li>";
+    }).join("") + "</ul>";
   }
 
   function modelDetail(row) {
@@ -890,21 +984,31 @@
       if (isHalfyield() || data.halfyield) {
         halfAreaFrame = Number(data.half_area) || 0;
         pieceAreaFrame = Number(data.piece_area) || 0;
-        massShareFrame = data.mass_share != null ? Number(data.mass_share) : massShareFromArea(areaShare(halfAreaFrame, pieceAreaFrame));
-        if (accumulate) {
-          const now = Date.now();
-          const stamp = yieldSamples.length && now <= yieldSamples[yieldSamples.length - 1][0]
-            ? yieldSamples[yieldSamples.length - 1][0] + 1
-            : now;
-          yieldSamples.push([stamp, halfAreaFrame, pieceAreaFrame]);
-          runFrames += 1;
-          massShareRun = massShareFromArea(integratedYieldShare(yieldSamples));
+        if (isBuiltinOn(HALFYIELD_METRIC_ID)) {
+          halfShareFrame = data.half_share != null
+            ? Number(data.half_share)
+            : (data.area_share != null
+              ? Number(data.area_share)
+              : areaShare(halfAreaFrame, pieceAreaFrame));
+          if (accumulate) {
+            const now = Date.now();
+            const stamp = yieldSamples.length && now <= yieldSamples[yieldSamples.length - 1][0]
+              ? yieldSamples[yieldSamples.length - 1][0] + 1
+              : now;
+            yieldSamples.push([stamp, halfAreaFrame, pieceAreaFrame]);
+            runFrames += 1;
+            halfShareRun = integratedYieldShare(yieldSamples);
+          } else {
+            recomputeYieldShare();
+          }
         } else {
-          recomputeYieldMass();
+          halfShareFrame = null;
+          halfShareRun = null;
+          if (accumulate) runFrames += 1;
         }
       } else if (accumulate) {
         addFrameToRun(data.measurements || []);
-        if (pecanClassesReady()) mergePecanSamples(data.pecan_samples);
+        if (pecanClassesReady() && anyPecanBuiltinOn()) mergePecanSamples(data.pecan_samples);
       }
       renderResult(data);
       renderMetrics();
@@ -1101,10 +1205,12 @@
       setMsg("Keep at most 8 metrics.", "err");
       return;
     }
+    const previous = editingId ? metrics.find((metric) => metric.id === editingId) : null;
     const entry = {
       id: editingId || undefined,
       name,
       formula,
+      enabled: previous ? previous.enabled !== false : true,
     };
     const next = editingId
       ? metrics.map((metric) => (metric.id === editingId ? { ...metric, ...entry, id: editingId } : metric))
@@ -1126,14 +1232,34 @@
     if (!button) return;
     const card = button.closest(".metric-card");
     if (!card) return;
+    const action = button.getAttribute("data-action");
+    const builtinId = card.getAttribute("data-builtin");
+    if (builtinId && (action === "enable" || action === "disable")) {
+      try {
+        await setBuiltinEnabled(builtinId, action === "enable");
+        setMsg(action === "enable" ? "KPI enabled." : "KPI disabled.", "ok");
+      } catch (err) {
+        setMsg(err.message || String(err), "err");
+      }
+      return;
+    }
     const id = card.getAttribute("data-id");
     const metric = metrics.find((row) => row.id === id);
     if (!metric) return;
-    if (button.getAttribute("data-action") === "edit") {
+    if (action === "enable" || action === "disable") {
+      try {
+        await setMetricEnabled(id, action === "enable");
+        setMsg(action === "enable" ? "KPI enabled." : "KPI disabled.", "ok");
+      } catch (err) {
+        setMsg(err.message || String(err), "err");
+      }
+      return;
+    }
+    if (action === "edit") {
       beginEdit(metric);
       return;
     }
-    if (button.getAttribute("data-action") === "delete") {
+    if (action === "delete") {
       try {
         await persistMetrics(metrics.filter((row) => row.id !== id));
         if (editingId === id) resetBuilder();

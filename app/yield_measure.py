@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 import math
+import re
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -245,11 +246,43 @@ def calculate_yield_statistics(
     }
 
 
+def sample_timestamps_ms(duration_ms: float, frames_per_sec: float) -> list[float]:
+    """Video-time sample points for n scored frames each second."""
+    if duration_ms < 0 or frames_per_sec <= 0:
+        return []
+    interval = 1000.0 / float(frames_per_sec)
+    if not math.isfinite(interval) or interval <= 0:
+        return []
+    times: list[float] = []
+    t = 0.0
+    # Include the last frame when duration is an exact multiple.
+    while t <= float(duration_ms) + 1e-6:
+        times.append(round(t, 6))
+        t += interval
+    return times
+
+
+def clamp_frames_per_sec(requested: float, video_fps: float) -> float:
+    """Keep the sample rate at least 1/60 and at most the video's own fps."""
+    try:
+        value = float(requested)
+    except (TypeError, ValueError):
+        value = 1.0
+    if not math.isfinite(value) or value <= 0:
+        value = 1.0
+    fps = float(video_fps) if video_fps and math.isfinite(float(video_fps)) else 1.0
+    if fps <= 0:
+        fps = 1.0
+    return max(1.0 / 60.0, min(value, fps))
+
+
 def save_yield_report(
     stats: dict[str, Any],
     output_path: Path,
     *,
     video_path: Path | None = None,
+    model_filename: str | None = None,
+    frames_per_sec: float | None = None,
 ) -> Path:
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -260,6 +293,10 @@ def save_yield_report(
         writer.writerow(["# Generated:", datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
         if video_path is not None:
             writer.writerow(["# Video:", str(video_path)])
+        if model_filename:
+            writer.writerow(["# Model:", str(model_filename)])
+        if frames_per_sec is not None:
+            writer.writerow(["# Frames per second:", f"{float(frames_per_sec):.4g}"])
         writer.writerow(["# Duration (seconds):", f"{float(stats.get('duration_sec') or 0):.2f}"])
         writer.writerow(["# Net Average Yield:", f"{float(stats.get('net_average') or 0):.6f}"])
         writer.writerow(["# Total Half Area:", f"{float(stats.get('total_half_area') or 0):.2f}"])
@@ -302,6 +339,104 @@ def save_yield_report(
                     mass_share,
                 ]
             )
+    return output_path
+
+
+def _safe_column(name: str) -> str:
+    text = re.sub(r"[^A-Za-z0-9_]+", "_", str(name or "")).strip("_")
+    return text or "value"
+
+
+def save_crack_report(
+    stats: dict[str, Any],
+    output_path: Path,
+    *,
+    video_path: Path | None = None,
+    model_filename: str | None = None,
+    frames_per_sec: float | None = None,
+) -> Path:
+    """Write a review CSV for Crack Analyst / custom-metric models."""
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    calibration = stats.get("calibration") or {}
+    class_names = [str(n) for n in (stats.get("class_names") or [])]
+    metrics = list(stats.get("metrics") or [])
+    pecan_cards = stats.get("pecan_builtins") or {}
+    final_custom = stats.get("custom_values") or {}
+    include_pecan = bool(stats.get("include_pecan"))
+    with output_path.open("w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["# Crack Analyst Review Report"])
+        writer.writerow(["# Generated:", datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
+        if video_path is not None:
+            writer.writerow(["# Video:", str(video_path)])
+        if model_filename:
+            writer.writerow(["# Model:", str(model_filename)])
+        if frames_per_sec is not None:
+            writer.writerow(["# Frames per second:", f"{float(frames_per_sec):.4g}"])
+        writer.writerow(["# Duration (seconds):", f"{float(stats.get('duration_sec') or 0):.2f}"])
+        writer.writerow(["# Frames scored:", int(stats.get("frames") or 0)])
+        for name, value in calibration.items():
+            if isinstance(value, dict):
+                for key, nested in value.items():
+                    writer.writerow([f"# Calibration {name}.{key}:", nested])
+            else:
+                writer.writerow([f"# Calibration {name}:", value])
+        if include_pecan:
+            for mid in (
+                "pecan_exposed_kernel_mean",
+                "pecan_exposed_kernel_median",
+                "pecan_broken_kernel_area_per_100",
+            ):
+                card = pecan_cards.get(mid) or {}
+                ready = card.get("ready")
+                value = card.get("value")
+                writer.writerow([f"# Final {mid}:", "" if value is None else value])
+                writer.writerow(
+                    [
+                        f"# Final {mid} ready:",
+                        "yes" if ready else f"no ({card.get('message') or 'insufficient data'})",
+                    ]
+                )
+            n_card = next(
+                (card for card in pecan_cards.values() if isinstance(card, dict) and "n" in card),
+                {},
+            )
+            writer.writerow(["# Final pecan_n:", int(n_card.get("n") or 0)])
+        for metric in metrics:
+            mid = str(metric.get("id") or "")
+            if not mid:
+                continue
+            label = str(metric.get("name") or mid)
+            writer.writerow(
+                [
+                    f"# Final {label}:",
+                    "" if final_custom.get(mid) is None else final_custom.get(mid),
+                ]
+            )
+            if label != mid:
+                writer.writerow([f"# Final {label} id:", mid])
+        writer.writerow([])
+        header = ["Time_Start_Seconds"]
+        for name in class_names:
+            safe = _safe_column(name)
+            header.append(f"count_{safe}")
+            header.append(f"area_{safe}")
+        if include_pecan:
+            header.extend(
+                [
+                    "pecan_exposed_kernel_mean",
+                    "pecan_exposed_kernel_median",
+                    "pecan_broken_kernel_area_per_100",
+                    "pecan_n",
+                ]
+            )
+        for metric in metrics:
+            mid = _safe_column(metric.get("id") or "metric")
+            header.append(f"{mid}_value")
+        writer.writerow(header)
+        for row in stats.get("binned_rows") or []:
+            writer.writerow(row)
     return output_path
 
 

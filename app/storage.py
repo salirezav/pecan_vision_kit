@@ -597,11 +597,11 @@ def analyze_storage_for_recording(
 def _speed_hints(*, width: int, height: int, fps: int, transport: str) -> list[str]:
     hints: list[str] = []
     if fps > 60:
-        hints.append(f"Lower frame rate from {fps} to 60 fps in Settings.")
+        hints.append(f"Lower frame rate from {fps} to 60 fps in Camera settings.")
     elif fps > 30:
-        hints.append(f"Lower frame rate from {fps} to 30 fps in Settings.")
+        hints.append(f"Lower frame rate from {fps} to 30 fps in Camera settings.")
     if width > 1280 or height > 720:
-        hints.append(f"Lower resolution from {width}×{height} to 1280×720 in Settings.")
+        hints.append(f"Lower resolution from {width}×{height} to 1280×720 in Camera settings.")
     elif width > 640:
         hints.append("Try 640×480 if the drive is still too slow.")
     if transport == "usb":

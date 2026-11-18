@@ -13,10 +13,11 @@
   }
 
   function normalizeMetric(metric) {
-    if (!metric) return { id: "", name: "", formula: "" };
+    if (!metric) return { id: "", name: "", formula: "", enabled: true };
+    const enabled = metric.enabled !== false;
     const formula = String(metric.formula || "").trim();
     if (formula) {
-      return { id: metric.id || "", name: metric.name || "", formula };
+      return { id: metric.id || "", name: metric.name || "", formula, enabled };
     }
     const numerator = metric.numerator || [];
     const denominator = metric.denominator || [];
@@ -25,9 +26,10 @@
         id: metric.id || "",
         name: metric.name || "",
         formula: ratioToFormula(metric.measure || "count", numerator, denominator),
+        enabled,
       };
     }
-    return { id: metric.id || "", name: metric.name || "", formula: "" };
+    return { id: metric.id || "", name: metric.name || "", formula: "", enabled };
   }
 
   function formulaLabels(formula) {
