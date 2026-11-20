@@ -27,7 +27,7 @@ How to image and hand off a Pecan Vision Kit without campus credentials.
 | Kit user home | `/home/pecan` |
 | App / repo | `/home/pecan/pecan-vision-kit` |
 | Desktop | Launchers only — **not** the live git tree |
-| Recordings + runtime config | `/mnt/recordings` |
+| Recordings + runtime config | `/mnt/recordings` (spare NVMe mount, or a directory on `/` when the OS lives on the only NVMe) |
 | Model weights | `~/pecan-vision-kit/weights/` (local, not in git) |
 
 ## First image / re-image steps
@@ -46,7 +46,7 @@ How to image and hand off a Pecan Vision Kit without campus credentials.
 3. Log in as `pecan` (or let autologin do it).
 4. Double-click **Start Pecan Vision** on the Desktop (or run `~/.local/share/pecan-vision/seed-start.sh`).
    That clones into `~/pecan-vision-kit` if needed, installs deps, enables `pecan-vision.service`, refreshes Desktop launchers, and opens the UI.
-5. For NVMe format, Wi‑Fi AP, or kiosk options, use **Setup / Repair Pecan Vision** (runs `scripts/setup-kit.sh`).
+5. For Wi‑Fi AP, kiosk, or (lab only) spare-NVMe formatting, use **Setup / Repair Pecan Vision** (`scripts/setup-kit.sh`). Field kits with OS on NVMe never format that disk — videos go to `/mnt/recordings` on the root filesystem.
 6. Write on the sticker:
    - AP SSID + password (from setup / `config/ap-credentials.txt`)
    - Linux user `pecan` + password `{hostname}1234` (VNC / SSH / sudo)

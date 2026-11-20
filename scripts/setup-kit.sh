@@ -19,6 +19,8 @@ DEFAULTS_YAML="$KIT_ROOT/config/defaults.yaml"
 VENV="$KIT_ROOT/.venv"
 MOUNT_POINT="/mnt/recordings"
 NVME_DEV="/dev/nvme0n1"
+# Set by prepare_nvme: dedicated (spare NVMe mount) | rootfs (dir on OS disk) | none
+STORAGE_MODE=""
 
 RED=$'\033[31m'; GREEN=$'\033[32m'; YEL=$'\033[33m'; CYA=$'\033[36m'; BLD=$'\033[1m'; RST=$'\033[0m'
 
@@ -27,6 +29,90 @@ info() { printf '%s==>%s %s\n' "$CYA" "$RST" "$*"; }
 ok()   { printf '%s[ok]%s %s\n' "$GREEN" "$RST" "$*"; }
 warn() { printf '%s[warn]%s %s\n' "$YEL" "$RST" "$*"; }
 err()  { printf '%s[error]%s %s\n' "$RED" "$RST" "$*" >&2; }
+
+# Resolve findmnt SOURCE (/dev/…, /dev/disk/by-uuid/…, PARTUUID=…) to a real /dev node.
+resolve_block_dev() {
+  local src="$1" candidate=""
+  [[ -z "$src" ]] && return 1
+  case "$src" in
+    UUID=*) candidate="/dev/disk/by-uuid/${src#UUID=}" ;;
+    PARTUUID=*) candidate="/dev/disk/by-partuuid/${src#PARTUUID=}" ;;
+    LABEL=*) candidate="/dev/disk/by-label/${src#LABEL=}" ;;
+    /dev/*) candidate="$src" ;;
+    *) candidate="$src" ;;
+  esac
+  if [[ -e "$candidate" ]]; then
+    readlink -f "$candidate" 2>/dev/null || printf '%s' "$candidate"
+    return 0
+  fi
+  printf '%s' "$src"
+}
+
+# True if disk (e.g. /dev/nvme0n1) backs the filesystem for path.
+disk_backs_path() {
+  local disk="$1" path="$2" src parent disk_base
+  src="$(findmnt -no SOURCE "$path" 2>/dev/null || true)"
+  [[ -z "$src" ]] && return 1
+  src="$(resolve_block_dev "$src")"
+  disk_base="${disk#/dev/}"
+  parent="$(lsblk -no PKNAME "$src" 2>/dev/null | head -1 | tr -d '[:space:]')"
+  if [[ -n "$parent" ]]; then
+    [[ "$parent" == "$disk_base" ]]
+    return
+  fi
+  [[ "$src" == "$disk" || "$src" == "$disk"* ]]
+}
+
+is_system_disk() {
+  local disk="$1"
+  disk_backs_path "$disk" "/" \
+    || disk_backs_path "$disk" "/boot" \
+    || disk_backs_path "$disk" "/boot/firmware"
+}
+
+disk_has_mounted_parts() {
+  local disk="$1" mp
+  while IFS= read -r mp; do
+    [[ -z "$mp" ]] && continue
+    # lsblk may list several mountpoints separated by space or newline
+    return 0
+  done < <(lsblk -no MOUNTPOINTS "$disk" 2>/dev/null | sed '/^$/d')
+  return 1
+}
+
+ensure_recordings_dir_on_rootfs() {
+  # Used when the OS disk is the only storage (typical NVMe-only kits).
+  # Keep the canonical app path /mnt/recordings as a normal directory on /.
+  # Never format the OS disk and never unmount a live filesystem.
+  info "Using $MOUNT_POINT on the root filesystem (no spare data disk)."
+  local rec_src root_src pk
+  root_src="$(resolve_block_dev "$(findmnt -no SOURCE / 2>/dev/null || true)")"
+  if mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
+    rec_src="$(resolve_block_dev "$(findmnt -no SOURCE "$MOUNT_POINT" 2>/dev/null || true)")"
+    pk="$(lsblk -no PKNAME "$rec_src" 2>/dev/null | head -1 | tr -d '[:space:]')"
+    if [[ -n "$rec_src" && "$rec_src" == "$root_src" ]]; then
+      err "$MOUNT_POINT is mounted from system volume $rec_src — refusing to reconfigure. Fix /etc/fstab manually."
+      return 1
+    fi
+    if [[ -n "$pk" ]] && is_system_disk "/dev/$pk"; then
+      err "$MOUNT_POINT is mounted from system disk /dev/$pk ($rec_src) — refusing to reconfigure. Fix /etc/fstab manually."
+      return 1
+    fi
+  fi
+  if awk '{print $2}' /etc/fstab 2>/dev/null | grep -qx "$MOUNT_POINT"; then
+    warn "Removing $MOUNT_POINT from /etc/fstab (OS-on-disk kits must not mount a separate recordings volume over the OS disk)."
+    sudo sed -i "\\|[[:space:]]${MOUNT_POINT}[[:space:]]|d" /etc/fstab
+    sudo systemctl daemon-reload || true
+    if mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
+      warn "Not unmounting $MOUNT_POINT while it is in use — reboot later so it becomes a normal directory on /."
+    fi
+  fi
+  sudo mkdir -p "$MOUNT_POINT/videos" "$MOUNT_POINT/models"
+  sudo chown -R "$USER_NAME:$USER_NAME" "$MOUNT_POINT"
+  df -h "$MOUNT_POINT" || df -h / || true
+  STORAGE_MODE="rootfs"
+  ok "Recordings path ready on root filesystem: $MOUNT_POINT/videos"
+}
 
 need_sudo() {
   if [[ "$(id -u)" -eq 0 ]]; then
@@ -71,7 +157,7 @@ User:    $USER_NAME
 
 This script can:
   1) Install packages + Python venv
-  2) Prepare NVMe recordings drive
+  2) Prepare recordings storage (spare NVMe or root filesystem)
   3) Install web app systemd service
   4) Configure always-on Wi‑Fi Access Point (config network)
   5) Write kit id / sticker info
@@ -119,60 +205,91 @@ setup_venv() {
 }
 
 prepare_nvme() {
-  info "Checking storage at $NVME_DEV…"
-  local root_src boot_src
-  root_src="$(findmnt -no SOURCE / 2>/dev/null || true)"
-  boot_src="$(findmnt -no SOURCE /boot/firmware 2>/dev/null || true)"
-  # The kit image sometimes uses the NVMe as the OS disk (p1 boot, p2 root).
-  # Partition 1 is then the firmware volume, not a recordings disk.
-  if [[ "$root_src" == "$NVME_DEV"* || "$boot_src" == "$NVME_DEV"* ]]; then
-    warn "$NVME_DEV is the system disk (root: ${root_src:-unknown}). Not partitioning it."
-    warn "Recordings will stay in $MOUNT_POINT on the root filesystem."
-    if awk '{print $2}' /etc/fstab | grep -qx "$MOUNT_POINT"; then
-      sudo sed -i "\\|[[:space:]]${MOUNT_POINT}[[:space:]]|d" /etc/fstab
-      sudo systemctl daemon-reload
-      ok "Removed $MOUNT_POINT from /etc/fstab (it pointed at the system disk)"
-    fi
-    sudo mkdir -p "$MOUNT_POINT/videos"
-    sudo chown -R "$USER_NAME:$USER_NAME" "$MOUNT_POINT"
-    df -h "$MOUNT_POINT" || true
-    ok "Recordings directory ready"
-    return
-  fi
-  if [[ ! -b "$NVME_DEV" ]]; then
-    warn "No NVMe found at $NVME_DEV — skipping disk setup."
-    sudo mkdir -p "$MOUNT_POINT/videos"
-    sudo chown -R "$USER_NAME:$USER_NAME" "$MOUNT_POINT"
+  # Two supported layouts:
+  #  1) OS on SD/eMMC + spare NVMe  → mount NVMe at /mnt/recordings
+  #  2) OS on NVMe only (most field kits) → /mnt/recordings is a directory on /
+  # Never format, repartition, or unmount the system disk.
+  info "Detecting storage layout…"
+  local root_src
+  root_src="$(resolve_block_dev "$(findmnt -no SOURCE / 2>/dev/null || true)")"
+  info "Root filesystem is on ${root_src:-unknown}"
+
+  if is_system_disk "$NVME_DEV"; then
+    warn "$NVME_DEV holds the OS — will not partition, format, or unmount it."
+    ensure_recordings_dir_on_rootfs
     return
   fi
 
+  if [[ ! -b "$NVME_DEV" ]]; then
+    warn "No spare NVMe at $NVME_DEV — recordings go on the root filesystem."
+    ensure_recordings_dir_on_rootfs
+    return
+  fi
+
+  if disk_has_mounted_parts "$NVME_DEV"; then
+    warn "$NVME_DEV has mounted partitions — refusing to format or repartition."
+    # If it is already mounted at our recordings path, reuse it.
+    if findmnt -no SOURCE "$MOUNT_POINT" 2>/dev/null | grep -q .; then
+      local msrc
+      msrc="$(resolve_block_dev "$(findmnt -no SOURCE "$MOUNT_POINT")")"
+      if [[ "$msrc" == "$NVME_DEV"* ]]; then
+        sudo mkdir -p "$MOUNT_POINT/videos" "$MOUNT_POINT/models"
+        sudo chown -R "$USER_NAME:$USER_NAME" "$MOUNT_POINT"
+        STORAGE_MODE="dedicated"
+        ok "Reusing existing recordings mount: $MOUNT_POINT ($msrc)"
+        df -h "$MOUNT_POINT" || true
+        return
+      fi
+    fi
+    ensure_recordings_dir_on_rootfs
+    return
+  fi
+
+  # Spare, unmounted NVMe (lab/kit with SD OS + data SSD).
+  info "Spare NVMe detected at $NVME_DEV (not the OS disk)."
   if lsblk -no FSTYPE "${NVME_DEV}p1" 2>/dev/null | grep -q .; then
     ok "NVMe already has a filesystem on ${NVME_DEV}p1"
   else
     warn "NVMe looks empty (no filesystem on partition 1)."
-    if ask_yn "Partition + format $NVME_DEV now? THIS ERASES THE DISK" "n"; then
+    if ask_yn "Partition + format $NVME_DEV as recordings? THIS ERASES ONLY THIS SPARE DISK" "n"; then
+      if is_system_disk "$NVME_DEV" || disk_has_mounted_parts "$NVME_DEV"; then
+        err "Safety check failed — aborting format."
+        ensure_recordings_dir_on_rootfs
+        return
+      fi
       sudo parted -s "$NVME_DEV" mklabel gpt
       sudo parted -s "$NVME_DEV" mkpart recordings ext4 1MiB 100%
       sleep 1
       sudo mkfs.ext4 -F -L recordings "${NVME_DEV}p1"
       ok "Formatted ${NVME_DEV}p1"
     else
-      warn "Skipped formatting."
+      warn "Skipped formatting spare NVMe — falling back to root filesystem path."
+      ensure_recordings_dir_on_rootfs
       return
     fi
   fi
 
   sudo mkdir -p "$MOUNT_POINT"
+  local UUID=""
   UUID="$(sudo blkid -s UUID -o value "${NVME_DEV}p1" || true)"
-  if [[ -n "$UUID" ]] && ! grep -q "$MOUNT_POINT" /etc/fstab; then
+  if [[ -n "$UUID" ]] && ! awk '{print $2}' /etc/fstab 2>/dev/null | grep -qx "$MOUNT_POINT"; then
     echo "UUID=$UUID $MOUNT_POINT ext4 defaults,noatime 0 2" | sudo tee -a /etc/fstab >/dev/null
     ok "Added fstab entry for $MOUNT_POINT"
   fi
-  sudo mount "$MOUNT_POINT" 2>/dev/null || sudo mount -a || true
-  sudo mkdir -p "$MOUNT_POINT/videos"
+  # Mount the spare disk only — never unmount anything.
+  if ! mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
+    sudo mount "$MOUNT_POINT" 2>/dev/null || sudo mount -a || true
+  fi
+  if ! mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
+    warn "Could not mount spare NVMe at $MOUNT_POINT — using directory on root filesystem."
+    ensure_recordings_dir_on_rootfs
+    return
+  fi
+  sudo mkdir -p "$MOUNT_POINT/videos" "$MOUNT_POINT/models"
   sudo chown -R "$USER_NAME:$USER_NAME" "$MOUNT_POINT"
+  STORAGE_MODE="dedicated"
   df -h "$MOUNT_POINT" || true
-  ok "Recordings mount ready"
+  ok "Dedicated recordings mount ready: $MOUNT_POINT"
 }
 
 write_kit_config() {
@@ -239,7 +356,7 @@ install_service() {
   sudo systemctl enable pecan-vision.service
   if ask_yn "Start / restart pecan-vision service now?" "y"; then
     if ! sudo systemctl restart pecan-vision.service; then
-      err "pecan-vision did not start. Check: journalctl -u pecan-vision -u mnt-recordings.mount"
+      err "pecan-vision did not start. Check: journalctl -u pecan-vision"
     else
       sleep 1
       systemctl --no-pager --full status pecan-vision.service || true
@@ -393,7 +510,7 @@ main_menu() {
   say "Choose what to run:"
   say "  1) Full setup (recommended on a new kit)"
   say "  2) Packages + Python only"
-  say "  3) NVMe / recordings disk only"
+  say "  3) Recordings storage only (safe for OS-on-NVMe)"
   say "  4) Web service only"
   say "  5) Access Point only"
   say "  6) Camera + VNC checks only"

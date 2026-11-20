@@ -10,7 +10,7 @@ Web recorder and vision tools for Raspberry Pi 5 workshop kits (USB global-shutt
 
 - Raspberry Pi 5 (Raspberry Pi OS / Debian)
 - USB3 UVC global-shutter camera (ELP/Ailipu AR0234-class; **not** CSI / `picamera2`)
-- NVMe SSD mounted at `/mnt/recordings` for videos and runtime config
+- Storage for videos and runtime config at `/mnt/recordings` — either a spare NVMe (when the OS is on SD) or a directory on the OS disk (NVMe-only kits). Setup never formats the system disk.
 
 ## Quick install
 

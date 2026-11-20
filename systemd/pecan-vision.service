@@ -2,13 +2,16 @@
 Description=Pecan Vision Kit web recorder
 After=network-online.target local-fs.target
 Wants=network-online.target
-RequiresMountsFor=/mnt/recordings
+# /mnt/recordings may be a dedicated NVMe mount (SD OS + data SSD) or a normal
+# directory on the root filesystem (NVMe-only OS kits). Do not require a separate
+# mount unit — a stale mnt-recordings.mount would block startup on OS-on-NVMe kits.
 
 [Service]
 Type=simple
 User=@KIT_USER@
 Group=@KIT_USER@
 WorkingDirectory=@KIT_ROOT@/app
+ExecStartPre=/usr/bin/test -d /mnt/recordings
 ExecStart=@KIT_ROOT@/.venv/bin/python @KIT_ROOT@/app/server.py
 Restart=on-failure
 RestartSec=3

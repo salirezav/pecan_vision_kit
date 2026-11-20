@@ -116,7 +116,24 @@ def list_volumes() -> list[dict[str, Any]]:
             }
         )
 
-    add(Path("/mnt/recordings"), label="Kit storage (NVMe)", kind="internal", device="/dev/nvme0n1p1")
+    kit_root = Path("/mnt/recordings")
+    kit_label = "Kit storage"
+    kit_device = ""
+    try:
+        src = subprocess.check_output(
+            ["findmnt", "-no", "SOURCE", str(kit_root)],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        if src:
+            kit_device = src
+            if "nvme" in src:
+                kit_label = "Kit storage (NVMe)"
+            elif src.startswith("/dev/"):
+                kit_label = "Kit storage (OS disk)"
+    except (OSError, subprocess.CalledProcessError):
+        kit_label = "Kit storage"
+    add(kit_root, label=kit_label, kind="internal", device=kit_device or None)
     videos = Path("/mnt/recordings/videos")
     if videos.exists():
         add(videos, label="Default videos folder", kind="internal")

@@ -15,6 +15,7 @@ SERVICE_SRC="$KIT_ROOT/systemd/pecan-vision.service"
 SUDOERS_SRC="$KIT_ROOT/config/sudoers-pecan-vision"
 VENV="$KIT_ROOT/.venv"
 MOUNT_POINT="/mnt/recordings"
+NVME_DEV="/dev/nvme0n1"
 SERVICE="pecan-vision.service"
 
 # If this script already lives inside a checkout, prefer that tree.
@@ -96,16 +97,84 @@ ensure_venv() {
   ok "Virtualenv ready: $VENV"
 }
 
-ensure_recordings_mount() {
-  if mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
-    sudo mkdir -p "$MOUNT_POINT/videos"
-    sudo chown -R "$USER_NAME:$USER_NAME" "$MOUNT_POINT" || true
-    ok "Recordings mount: $MOUNT_POINT"
+resolve_block_dev() {
+  local src="$1" candidate=""
+  [[ -z "$src" ]] && return 1
+  case "$src" in
+    UUID=*) candidate="/dev/disk/by-uuid/${src#UUID=}" ;;
+    PARTUUID=*) candidate="/dev/disk/by-partuuid/${src#PARTUUID=}" ;;
+    LABEL=*) candidate="/dev/disk/by-label/${src#LABEL=}" ;;
+    /dev/*) candidate="$src" ;;
+    *) candidate="$src" ;;
+  esac
+  if [[ -e "$candidate" ]]; then
+    readlink -f "$candidate" 2>/dev/null || printf '%s' "$candidate"
+    return 0
+  fi
+  printf '%s' "$src"
+}
+
+disk_backs_path() {
+  local disk="$1" path="$2" src parent disk_base
+  src="$(findmnt -no SOURCE "$path" 2>/dev/null || true)"
+  [[ -z "$src" ]] && return 1
+  src="$(resolve_block_dev "$src")"
+  disk_base="${disk#/dev/}"
+  parent="$(lsblk -no PKNAME "$src" 2>/dev/null | head -1 | tr -d '[:space:]')"
+  if [[ -n "$parent" ]]; then
+    [[ "$parent" == "$disk_base" ]]
     return
   fi
-  warn "$MOUNT_POINT is not mounted — service unit RequiresMountsFor may fail until NVMe is prepared."
-  warn "Run ./scripts/setup-kit.sh and choose NVMe / recordings disk if needed."
-  sudo mkdir -p "$MOUNT_POINT/videos" 2>/dev/null || true
+  [[ "$src" == "$disk" || "$src" == "$disk"* ]]
+}
+
+is_system_disk() {
+  local disk="$1"
+  disk_backs_path "$disk" "/" \
+    || disk_backs_path "$disk" "/boot" \
+    || disk_backs_path "$disk" "/boot/firmware"
+}
+
+ensure_recordings_mount() {
+  # Non-interactive: never format or unmount. Prefer existing spare-NVMe mount;
+  # otherwise use /mnt/recordings as a directory on the OS disk (NVMe-only kits).
+  info "Ensuring recordings path at $MOUNT_POINT…"
+
+  if is_system_disk "$NVME_DEV"; then
+    warn "$NVME_DEV is the OS disk — not formatting or mounting it as a data volume."
+    if awk '{print $2}' /etc/fstab 2>/dev/null | grep -qx "$MOUNT_POINT"; then
+      warn "Removing $MOUNT_POINT from /etc/fstab (will not unmount if currently mounted)."
+      sudo sed -i "\\|[[:space:]]${MOUNT_POINT}[[:space:]]|d" /etc/fstab
+      sudo systemctl daemon-reload || true
+    fi
+    sudo mkdir -p "$MOUNT_POINT/videos" "$MOUNT_POINT/models"
+    sudo chown -R "$USER_NAME:$USER_NAME" "$MOUNT_POINT" || true
+    ok "Recordings directory on root filesystem: $MOUNT_POINT"
+    return
+  fi
+
+  if mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
+    sudo mkdir -p "$MOUNT_POINT/videos" "$MOUNT_POINT/models"
+    sudo chown -R "$USER_NAME:$USER_NAME" "$MOUNT_POINT" || true
+    ok "Recordings mount present: $MOUNT_POINT"
+    return
+  fi
+
+  # Spare NVMe with existing filesystem and fstab — try mount once, never format.
+  if [[ -b "${NVME_DEV}p1" ]] && ! is_system_disk "$NVME_DEV"; then
+    sudo mkdir -p "$MOUNT_POINT"
+    if sudo mount "$MOUNT_POINT" 2>/dev/null; then
+      sudo mkdir -p "$MOUNT_POINT/videos" "$MOUNT_POINT/models"
+      sudo chown -R "$USER_NAME:$USER_NAME" "$MOUNT_POINT" || true
+      ok "Mounted spare NVMe at $MOUNT_POINT"
+      return
+    fi
+  fi
+
+  sudo mkdir -p "$MOUNT_POINT/videos" "$MOUNT_POINT/models"
+  sudo chown -R "$USER_NAME:$USER_NAME" "$MOUNT_POINT" || true
+  ok "Recordings path ready as directory: $MOUNT_POINT"
+  warn "For interactive spare-NVMe formatting (SD OS + data SSD only), run setup-kit.sh."
 }
 
 render_and_install_service() {
@@ -142,7 +211,7 @@ render_and_install_service() {
 start_service() {
   info "Starting $SERVICE…"
   if ! sudo systemctl restart "$SERVICE"; then
-    err "Service failed to start. Check: journalctl -u pecan-vision -u mnt-recordings.mount"
+    err "Service failed to start. Check: journalctl -u pecan-vision"
     sudo systemctl --no-pager --full status "$SERVICE" || true
     return 1
   fi
