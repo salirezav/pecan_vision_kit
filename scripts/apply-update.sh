@@ -3,6 +3,16 @@
 # Invoked via passwordless sudo from the web UI (setsid / detached).
 set -euo pipefail
 
+# setsid stays inside the pecan-vision cgroup, so systemctl stop kills the
+# installer along with the web app. Move into a transient unit first.
+if [[ -z "${PECAN_UPDATE_DETACHED:-}" ]] && grep -q 'pecan-vision.service' /proc/self/cgroup 2>/dev/null; then
+  unit="pecan-vision-update-$(date +%s)"
+  exec systemd-run --collect --quiet \
+    --setenv=PECAN_UPDATE_DETACHED=1 \
+    --unit="$unit" \
+    /usr/bin/bash "$0"
+fi
+
 REQUEST_FILE="/mnt/recordings/update-request.json"
 # Prefer request file (sudo env_reset drops PECAN_*). Env vars remain a fallback.
 if [[ -f "$REQUEST_FILE" ]]; then
@@ -123,7 +133,7 @@ resolve_kit_user() {
     elif [[ "$KIT_ROOT" =~ ^/home/([^/]+)/ ]]; then
       USER_NAME="${BASH_REMATCH[1]}"
     else
-      USER_NAME="engr-ugaif"
+      USER_NAME="pecan"
     fi
   fi
   HOME_DIR="$(getent passwd "$USER_NAME" | cut -d: -f6 || true)"
@@ -233,9 +243,8 @@ fi
 if [[ -f "$KIT_ROOT/systemd/pecan-vision.service" ]]; then
   TMP="$(mktemp)"
   sed \
-    -e "s|/home/engr-ugaif/pecan-vision-kit|$KIT_ROOT|g" \
-    -e "s|^User=engr-ugaif|User=$USER_NAME|" \
-    -e "s|^Group=engr-ugaif|Group=$USER_NAME|" \
+    -e "s|@KIT_ROOT@|$KIT_ROOT|g" \
+    -e "s|@KIT_USER@|$USER_NAME|g" \
     "$KIT_ROOT/systemd/pecan-vision.service" > "$TMP"
   cp "$TMP" "$UNIT_DST"
   rm -f "$TMP"
@@ -245,8 +254,8 @@ fi
 if [[ -f "$KIT_ROOT/config/sudoers-pecan-vision" ]]; then
   SUDO_TMP="$(mktemp)"
   sed \
-    -e "s|/home/engr-ugaif/pecan-vision-kit|$KIT_ROOT|g" \
-    -e "s|^engr-ugaif |$USER_NAME |" \
+    -e "s|@KIT_ROOT@|$KIT_ROOT|g" \
+    -e "s|@KIT_USER@|$USER_NAME|g" \
     "$KIT_ROOT/config/sudoers-pecan-vision" > "$SUDO_TMP"
   if visudo -cf "$SUDO_TMP"; then
     cp "$SUDO_TMP" "$SUDOERS_DST"
