@@ -79,8 +79,62 @@ snapshot_tree() {
   done
 }
 
+UNIT_DST="/etc/systemd/system/pecan-vision.service"
+SUDOERS_DST="/etc/sudoers.d/pecan-vision"
+UNIT_SAVED=""
+SUDOERS_SAVED=""
+
+save_host_config() {
+  UNIT_SAVED="$WORK/host-unit.service"
+  SUDOERS_SAVED="$WORK/host-sudoers"
+  if [[ -f "$UNIT_DST" ]]; then
+    cp "$UNIT_DST" "$UNIT_SAVED"
+  fi
+  if [[ -f "$SUDOERS_DST" ]]; then
+    cp "$SUDOERS_DST" "$SUDOERS_SAVED"
+  fi
+}
+
+restore_host_config() {
+  if [[ -n "$UNIT_SAVED" && -f "$UNIT_SAVED" ]]; then
+    cp "$UNIT_SAVED" "$UNIT_DST"
+    systemctl daemon-reload || true
+  fi
+  if [[ -n "$SUDOERS_SAVED" && -f "$SUDOERS_SAVED" ]]; then
+    cp "$SUDOERS_SAVED" "$SUDOERS_DST"
+    chmod 440 "$SUDOERS_DST" || true
+  fi
+}
+
+# The updater runs as root, and a previous run can leave the tree owned by root.
+# Prefer the user who launched sudo, then a non-root owner of the app, then the
+# /home/<user> prefix. Never treat root as the kit login.
+resolve_kit_user() {
+  local owner=""
+  if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
+    USER_NAME="$SUDO_USER"
+  else
+    owner="$(stat -c '%U' "$KIT_ROOT/app/server.py" 2>/dev/null || true)"
+    if [[ -z "$owner" || "$owner" == "root" ]]; then
+      owner="$(stat -c '%U' "$KIT_ROOT/.venv" 2>/dev/null || true)"
+    fi
+    if [[ -n "$owner" && "$owner" != "root" ]]; then
+      USER_NAME="$owner"
+    elif [[ "$KIT_ROOT" =~ ^/home/([^/]+)/ ]]; then
+      USER_NAME="${BASH_REMATCH[1]}"
+    else
+      USER_NAME="engr-ugaif"
+    fi
+  fi
+  HOME_DIR="$(getent passwd "$USER_NAME" | cut -d: -f6 || true)"
+  if [[ -z "$HOME_DIR" ]]; then
+    HOME_DIR="/home/$USER_NAME"
+  fi
+}
+
 restore_backup() {
   local backup="$1"
+  restore_host_config
   if [[ ! -d "$backup" ]]; then
     log "No backup at $backup"
     systemctl start "$SERVICE" || true
@@ -139,6 +193,7 @@ write_status "backing_up" "Saving rollback snapshot to $BACKUP_DIR"
 snapshot_tree "$BACKUP_DIR"
 
 write_status "installing" "Stopping service and installing $VERSION"
+save_host_config
 systemctl stop "$SERVICE" || true
 sleep 1
 
@@ -156,8 +211,10 @@ rsync -a --delete \
 chmod +x "$KIT_ROOT/scripts/"*.sh 2>/dev/null || true
 
 write_status "deps" "Refreshing Python dependencies"
-USER_NAME="$(stat -c '%U' "$KIT_ROOT" 2>/dev/null || echo engr-ugaif)"
-HOME_DIR="$(getent passwd "$USER_NAME" | cut -d: -f6)"
+resolve_kit_user
+log "Kit user $USER_NAME home $HOME_DIR"
+[[ -d "$KIT_ROOT/app" && "$KIT_ROOT" != "/" ]] || fail "Refusing to change ownership of $KIT_ROOT"
+chown -R "$USER_NAME:$USER_NAME" "$KIT_ROOT"
 UV="$HOME_DIR/.local/bin/uv"
 if ! command -v uv >/dev/null 2>&1 && [[ ! -x "$UV" ]]; then
   curl -LsSf https://astral.sh/uv/install.sh | sudo -u "$USER_NAME" env UV_INSTALL_DIR="$HOME_DIR/.local/bin" sh
@@ -177,11 +234,10 @@ if [[ -f "$KIT_ROOT/systemd/pecan-vision.service" ]]; then
   TMP="$(mktemp)"
   sed \
     -e "s|/home/engr-ugaif/pecan-vision-kit|$KIT_ROOT|g" \
-    -e "s|/home/engr-ugaif|$HOME_DIR|g" \
-    -e "s|User=engr-ugaif|User=$USER_NAME|g" \
-    -e "s|Group=engr-ugaif|Group=$USER_NAME|g" \
+    -e "s|^User=engr-ugaif|User=$USER_NAME|" \
+    -e "s|^Group=engr-ugaif|Group=$USER_NAME|" \
     "$KIT_ROOT/systemd/pecan-vision.service" > "$TMP"
-  cp "$TMP" /etc/systemd/system/pecan-vision.service
+  cp "$TMP" "$UNIT_DST"
   rm -f "$TMP"
   systemctl daemon-reload
 fi
@@ -189,12 +245,14 @@ fi
 if [[ -f "$KIT_ROOT/config/sudoers-pecan-vision" ]]; then
   SUDO_TMP="$(mktemp)"
   sed \
-    -e "s|engr-ugaif|$USER_NAME|g" \
-    -e "s|/home/engr-ugaif|$HOME_DIR|g" \
+    -e "s|/home/engr-ugaif/pecan-vision-kit|$KIT_ROOT|g" \
+    -e "s|^engr-ugaif |$USER_NAME |" \
     "$KIT_ROOT/config/sudoers-pecan-vision" > "$SUDO_TMP"
   if visudo -cf "$SUDO_TMP"; then
-    cp "$SUDO_TMP" /etc/sudoers.d/pecan-vision
-    chmod 440 /etc/sudoers.d/pecan-vision
+    cp "$SUDO_TMP" "$SUDOERS_DST"
+    chmod 440 "$SUDOERS_DST"
+  else
+    log "Refusing to install sudoers file that visudo rejected"
   fi
   rm -f "$SUDO_TMP"
 fi

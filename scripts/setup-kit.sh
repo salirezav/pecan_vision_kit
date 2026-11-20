@@ -214,9 +214,8 @@ install_service() {
   tmp="$(mktemp)"
   sed \
     -e "s|/home/engr-ugaif/pecan-vision-kit|$KIT_ROOT|g" \
-    -e "s|/home/engr-ugaif|$HOME_DIR|g" \
-    -e "s|User=engr-ugaif|User=$USER_NAME|g" \
-    -e "s|Group=engr-ugaif|Group=$USER_NAME|g" \
+    -e "s|^User=engr-ugaif|User=$USER_NAME|" \
+    -e "s|^Group=engr-ugaif|Group=$USER_NAME|" \
     "$SERVICE_SRC" > "$tmp"
   sudo cp "$tmp" /etc/systemd/system/pecan-vision.service
   rm -f "$tmp"
@@ -224,8 +223,8 @@ install_service() {
   local sudoers_tmp
   sudoers_tmp="$(mktemp)"
   sed \
-    -e "s|engr-ugaif|$USER_NAME|g" \
-    -e "s|/home/engr-ugaif|$HOME_DIR|g" \
+    -e "s|/home/engr-ugaif/pecan-vision-kit|$KIT_ROOT|g" \
+    -e "s|^engr-ugaif |$USER_NAME |" \
     "$SUDOERS_SRC" > "$sudoers_tmp"
   sudo cp "$sudoers_tmp" /etc/sudoers.d/pecan-vision
   sudo chmod 440 /etc/sudoers.d/pecan-vision
