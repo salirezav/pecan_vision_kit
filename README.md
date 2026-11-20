@@ -2,6 +2,8 @@
 
 Web recorder and vision tools for Raspberry Pi 5 workshop kits (USB global-shutter camera + NVMe storage).
 
+**Docs site:** [salirezav.github.io/pecan_vision_kit](https://salirezav.github.io/pecan_vision_kit/) (this README, published via GitHub Pages).
+
 **The `0.x` line is a preview.** It is not a finished, bullet-proof release. Expect rough edges, missing polish, and breaking changes until `1.0.0`.
 
 ## Hardware
