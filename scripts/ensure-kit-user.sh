@@ -4,6 +4,7 @@
 #
 # Usage (as root or with sudo):
 #   sudo ./scripts/ensure-kit-user.sh
+#   # Default password is "$(hostname)1234" unless PECAN_KIT_PASSWORD is set.
 #   sudo PECAN_KIT_PASSWORD='…' ./scripts/ensure-kit-user.sh
 #   sudo PECAN_KIT_USER=pecan PECAN_AUTOLOGIN=1 ./scripts/ensure-kit-user.sh
 if [ -z "${BASH_VERSION:-}" ]; then
@@ -54,18 +55,26 @@ for grp in sudo video; do
 done
 
 set_password() {
-  local pass="${PECAN_KIT_PASSWORD:-}"
-  if [[ -z "$pass" ]]; then
-    if [[ ! -t 0 ]]; then
-      warn "No PECAN_KIT_PASSWORD and stdin is not a TTY — leaving password unchanged"
-      return
-    fi
-    info "Set a unique kit password (write it on the admin sticker)."
-    passwd "$KIT_USER"
-    return
+  local host pass
+  host="$(hostname -s 2>/dev/null || hostname || true)"
+  host="${host%%.*}"
+  host="$(printf '%s' "$host" | tr -d '[:space:]')"
+  if [[ -z "$host" ]]; then
+    err "Could not read hostname for default password"
+    exit 1
   fi
+  # Default: {hostname}1234 (e.g. pecancam-01 → pecancam-011234)
+  pass="${PECAN_KIT_PASSWORD:-${host}1234}"
   echo "$KIT_USER:$pass" | chpasswd
-  ok "Password set from PECAN_KIT_PASSWORD"
+  if [[ -n "${PECAN_KIT_PASSWORD:-}" ]]; then
+    ok "Password set from PECAN_KIT_PASSWORD"
+  else
+    ok "Password set to \${hostname}1234 → ${host}1234"
+  fi
+  KIT_PASSWORD_HINT="${host}1234"
+  if [[ -n "${PECAN_KIT_PASSWORD:-}" ]]; then
+    KIT_PASSWORD_HINT="(custom via PECAN_KIT_PASSWORD)"
+  fi
 }
 
 set_password
@@ -147,13 +156,15 @@ cat <<EOF
 ${GREEN}${BLD}Kit user ready.${RST}
   User:     $KIT_USER
   Home:     $HOME_DIR
+  Password: $KIT_PASSWORD_HINT
   Canonical install path: $KIT_ROOT_DEFAULT
   Seed launcher: $HOME_DIR/Desktop/Start Pecan Vision.desktop
 
 Next (as $KIT_USER):
   1. Double-click Start Pecan Vision, or run:
        $SEED_DIR/seed-start.sh
-  2. Write the Linux password on the kit admin sticker (unique per kit).
+  2. Confirm the Linux password on the kit admin sticker
+     (default is hostname + 1234, e.g. \$(hostname)1234).
   3. Do ${YEL}not${RST} ship campus accounts (e.g. engr-ugaif) or shared UGA passwords.
 
 EOF

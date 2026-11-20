@@ -15,9 +15,10 @@ How to image and hand off a Pecan Vision Kit without campus credentials.
 
 ## Password policy
 
-- Unique password per kit (or per small batch).
-- Write it on the admin sticker / card next to the `PecanCam-XX` Wi‑Fi password.
-- Give the kit user `sudo` (setup and updates need it). Passwordless sudo is limited to service control + `apply-update.sh` via `/etc/sudoers.d/pecan-vision`.
+- Default Linux password for `pecan` is **`{hostname}1234`**, using the short hostname from the Pi (`hostname` / `hostname -s`). Example: hostname `pecancam-03` → password `pecancam-031234`.
+- Override with `PECAN_KIT_PASSWORD` if needed; otherwise `ensure-kit-user.sh` always applies the hostname rule (no interactive `passwd` prompt).
+- Write that password on the admin sticker / card next to the `PecanCam-XX` Wi‑Fi password. Set a distinct hostname per kit so passwords differ.
+- The kit user is in the `sudo` group (setup and updates need it). Passwordless sudo is limited to service control + `apply-update.sh` via `/etc/sudoers.d/pecan-vision`.
 
 ## Canonical paths
 
@@ -35,8 +36,9 @@ How to image and hand off a Pecan Vision Kit without campus credentials.
 2. Create the kit account and seed Desktop launcher:
 
    ```bash
-   # From a temporary copy of the repo, or after cloning once as root-capable admin:
-   sudo PECAN_KIT_PASSWORD='unique-kit-password' ./scripts/ensure-kit-user.sh
+   # From a temporary copy of the repo, or after cloning once as root-capable admin.
+   # Sets password to $(hostname)1234 unless PECAN_KIT_PASSWORD is set:
+   sudo ./scripts/ensure-kit-user.sh
    # Optional desktop autologin for kiosk kits:
    sudo PECAN_AUTOLOGIN=1 ./scripts/ensure-kit-user.sh
    ```
@@ -47,7 +49,7 @@ How to image and hand off a Pecan Vision Kit without campus credentials.
 5. For NVMe format, Wi‑Fi AP, or kiosk options, use **Setup / Repair Pecan Vision** (runs `scripts/setup-kit.sh`).
 6. Write on the sticker:
    - AP SSID + password (from setup / `config/ap-credentials.txt`)
-   - Linux user `pecan` + the unique password (VNC / SSH / sudo)
+   - Linux user `pecan` + password `{hostname}1234` (VNC / SSH / sudo)
 
 ## Day-to-day
 
