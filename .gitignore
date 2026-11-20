@@ -16,3 +16,5 @@ dist/
 *.tar.gz
 SHA256SUMS
 site/_site/
+find-pi-ssh.ps1
+setup-pi-lan-share.ps1

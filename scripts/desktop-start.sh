@@ -53,12 +53,17 @@ for _ in $(seq 1 30); do
 done
 
 open_ui() {
+  # Over SSH / headless there is no usable display — xdg-open can hang forever.
+  if [[ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]] || [[ -n "${SSH_CONNECTION:-}" && -z "${DISPLAY:-}" ]]; then
+    warn "No GUI session — skip opening a browser. Use $URL on the Pi or http://<pi-ip>:8080"
+    return
+  fi
   if command -v xdg-open >/dev/null 2>&1; then
-    xdg-open "$URL" >/dev/null 2>&1 || true
+    timeout 5 xdg-open "$URL" >/dev/null 2>&1 || true
     return
   fi
   if command -v chromium >/dev/null 2>&1; then
-    chromium --new-window "$URL" >/dev/null 2>&1 || true
+    timeout 5 chromium --new-window "$URL" >/dev/null 2>&1 || true
     return
   fi
   warn "Open a browser to $URL"
