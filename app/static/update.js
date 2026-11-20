@@ -143,10 +143,18 @@
       return;
     }
     refreshAdminPanel(data);
-    if (data.last_status && data.last_status.state && data.last_status.state !== "ok") {
+    wireCheckButton();
+    const busyStates = ["starting", "downloading", "extracting", "backing_up", "installing", "deps", "verifying"];
+    if (data.last_status && busyStates.includes(data.last_status.state)) {
       renderLastStatus(host, data.last_status);
-      if (data.update_available && !["starting", "downloading", "extracting", "backing_up", "installing", "deps", "verifying"].includes(data.last_status.state)) {
-        // keep failure visible; still allow a new update banner below via re-check later
+      return;
+    }
+    if (data.last_status && data.last_status.state === "failed") {
+      renderLastStatus(host, data.last_status);
+      if (data.update_available) {
+        const retry = document.createElement("div");
+        host.appendChild(retry);
+        renderAvailable(retry, data);
       }
       return;
     }
@@ -165,8 +173,13 @@
     if (data.update_available) {
       renderAvailable(host, data);
     }
+  }
 
-    document.getElementById("btn-check-update")?.addEventListener("click", async () => {
+  function wireCheckButton() {
+    const button = document.getElementById("btn-check-update");
+    if (!button || button.dataset.bound === "1") return;
+    button.dataset.bound = "1";
+    button.addEventListener("click", async () => {
       const state = document.getElementById("software-update-state");
       if (state) state.textContent = "Checking…";
       try {
