@@ -17,7 +17,7 @@
         <a href="{{ url_for('ui.index') }}#record">Record</a>
         <a href="{{ url_for('ui.index') }}#camera-settings">Camera Settings</a>
         <span class="nav-divider" aria-hidden="true">|</span>
-        <a href="{{ url_for('ui.videos_page') }}">Videos</a>
+        <a href="{{ url_for('ui.videos_page') }}">Videos &amp; Pictures</a>
         <span class="nav-divider" aria-hidden="true">|</span>
         <a href="{{ url_for('ui.model_page') }}">Model</a>
         <a href="{{ url_for('ui.deploy_page') }}">Deploy</a>
@@ -32,7 +32,7 @@
     {% block content %}{% endblock %}
   </main>
   <footer>
-    <p>Videos save to the kit’s storage drive. Need help? Open <strong>Admin</strong>.</p>
+    <p>Videos and pictures save to the kit’s storage drive. Need help? Open <strong>Admin</strong>.</p>
     <p class="version">Software {{ app_version_label|default(app_version|default('?')) }}</p>
   </footer>
   <script>

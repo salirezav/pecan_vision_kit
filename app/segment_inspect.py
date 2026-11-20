@@ -210,7 +210,7 @@ class _CheckpointUnpickler(pickle.Unpickler):
 
 def _checkpoint_object(path: Path) -> dict[str, Any]:
     if not zipfile.is_zipfile(path):
-        raise ValueError("Upload a .pt, .pth, or .hef weights file.")
+        raise ValueError("Upload a .pt, .pth, .hef, or Hailo export .zip weights file.")
     with zipfile.ZipFile(path) as archive:
         pickles = [name for name in archive.namelist() if name.endswith("/data.pkl") or name == "data.pkl"]
         if not pickles:
@@ -323,12 +323,159 @@ def _tensor_size(model: dict[str, Any], key: str) -> tuple[int, ...] | None:
     return None
 
 
+def _imgsz_side(raw: Any) -> int:
+    if isinstance(raw, (list, tuple)) and raw:
+        values = [int(item) for item in raw if str(item).strip()]
+        return max(values) if values else 0
+    try:
+        return int(raw or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def is_hailo_export_dir(path: Path) -> bool:
+    """True when path is a Ultralytics Hailo export directory on disk."""
+    folder = Path(path)
+    if not folder.is_dir() or folder.name.startswith("."):
+        return False
+    if not folder.name.endswith("_hailo_model"):
+        return False
+    return (folder / "metadata.yaml").is_file() and any(folder.glob("*.hef"))
+
+
+def inspect_hailo_export_dir(path: Path) -> dict[str, Any]:
+    """Read Ultralytics Hailo export metadata for YOLOv8/YOLO11-seg on hailo8."""
+    import yaml
+
+    folder = Path(path)
+    meta_path = folder / "metadata.yaml"
+    if not meta_path.is_file():
+        raise ValueError("This Hailo export is missing metadata.yaml.")
+    hef_files = sorted(folder.glob("*.hef"))
+    if not hef_files:
+        raise ValueError("This Hailo export is missing a .hef file.")
+    try:
+        raw = yaml.safe_load(meta_path.read_text()) or {}
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(f"Could not read metadata.yaml ({exc}).") from exc
+    if not isinstance(raw, dict):
+        raise ValueError("metadata.yaml must be a mapping of model fields.")
+
+    task = str(raw.get("task") or "").strip().lower()
+    head = str(raw.get("head") or "").strip()
+    arch = str(raw.get("hailo_arch") or "").strip().lower()
+    imgsz = _imgsz_side(raw.get("imgsz"))
+
+    if head == "Segment26":
+        raise ValueError(
+            "YOLO26 instance segmentation cannot be compiled for Hailo-8. "
+            "Export a YOLOv8-seg or YOLO11-seg model with format=hailo and name=hailo8."
+        )
+    if task != "segment":
+        raise ValueError("This Hailo export is not an instance segmentation model.")
+    if head != "Segment":
+        raise ValueError(
+            f"This kit only runs YOLOv8/YOLO11 Segment HEFs on Hailo-8 (got head={head or 'unknown'})."
+        )
+    if arch != "hailo8":
+        raise ValueError(
+            f"This kit has a Hailo-8; upload an export with hailo_arch=hailo8 (got {arch or 'unknown'})."
+        )
+    if imgsz != 640:
+        raise ValueError(f"This kit expects imgsz=640 for Hailo segmentation (got {imgsz or 'unknown'}).")
+
+    names = _class_name_list(raw.get("names"))
+    num_classes = len(names) if names else _positive_int(raw.get("nc")) or 0
+    if num_classes < 1:
+        raise ValueError("Could not read how many classes this Hailo export has.")
+    network = hef_files[0].stem
+    return {
+        "family": "hailo",
+        "task": "segment",
+        "backend": "ultralytics",
+        "architecture": network,
+        "variant": network,
+        "resolution": 640,
+        "input_height": 640,
+        "input_width": 640,
+        "num_classes": num_classes,
+        "hef_postprocess": "ultralytics_seg",
+        "hailo_arch": "hailo8",
+        "names_from_file": bool(names),
+        "class_names": names,
+    }
+
+
+def _zip_member_ignored(parts: list[str]) -> bool:
+    """Skip macOS/Windows junk and anything that is not HEF/metadata."""
+    if not parts:
+        return True
+    if any(part.startswith("__MACOSX") or part == ".DS_Store" for part in parts):
+        return True
+    leaf = parts[-1]
+    if leaf.startswith(".") or leaf in {"Thumbs.db", "desktop.ini"}:
+        return True
+    lower = leaf.lower()
+    return lower != "metadata.yaml" and not lower.endswith(".hef")
+
+
+def extract_hailo_export_zip(zip_path: Path, dest_dir: Path) -> Path:
+    """Extract only *.hef and metadata.yaml from a Hailo export zip into dest_dir."""
+    dest = Path(dest_dir)
+    dest.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path) as archive:
+        members = [info for info in archive.infolist() if not info.is_dir()]
+        if not members:
+            raise ValueError("That zip is empty.")
+        kept: list[tuple[str, str]] = []
+        for info in members:
+            name = info.filename.replace("\\", "/")
+            parts = [part for part in name.split("/") if part and part != "."]
+            if not parts or any(part == ".." for part in parts):
+                raise ValueError("That zip has an unsafe path.")
+            if _zip_member_ignored(parts):
+                continue
+            leaf = parts[-1]
+            lower = leaf.lower()
+            if lower == "metadata.yaml":
+                kept.append((name, "metadata.yaml"))
+            else:
+                kept.append((name, leaf))
+        meta_count = sum(1 for _src, leaf in kept if leaf == "metadata.yaml")
+        hef_count = sum(1 for _src, leaf in kept if leaf.lower().endswith(".hef"))
+        if meta_count != 1 or hef_count < 1:
+            raise ValueError(
+                "That zip must contain exactly one metadata.yaml and at least one .hef "
+                "(other files are ignored)."
+            )
+        for src, leaf in kept:
+            target = dest / leaf
+            if target.exists():
+                raise ValueError(f"That zip has duplicate file names ({leaf}).")
+            with archive.open(src) as source, target.open("wb") as out:
+                while True:
+                    chunk = source.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+    return dest
+
+
 def inspect_checkpoint(path: Path) -> dict[str, Any]:
-    if Path(path).suffix.lower() == ".hef":
+    target = Path(path)
+    if target.is_dir():
+        return inspect_hailo_export_dir(target)
+    suffix = target.suffix.lower()
+    if suffix == ".hef":
         from hailo_runtime import inspect_hef  # noqa: PLC0415
 
-        return inspect_hef(Path(path))
-    obj = _checkpoint_object(path)
+        return inspect_hef(target)
+    if suffix == ".zip":
+        raise ValueError(
+            "Upload a Ultralytics Hailo export zip through the Model page "
+            "(it is unpacked into a Hailo model folder)."
+        )
+    obj = _checkpoint_object(target)
     if not isinstance(obj, dict):
         if _origin_of(obj):
             return _inspect_ultralytics({"model": obj}, obj)
@@ -548,6 +695,10 @@ def infer_frame_max_side(meta: dict[str, Any] | None, speed: str = "fast") -> in
     info = meta if isinstance(meta, dict) else {}
     speed_key = speed if speed in SPEED_SIZES else "fast"
     family = str(info.get("family") or "rfdetr")
+    backend = str(info.get("backend") or "")
+    # Ultralytics Hailo HEFs are compiled for a fixed input size.
+    if family == "hailo" and backend == "ultralytics":
+        return int(info.get("resolution") or 640)
     if family in {"ultralytics", "hailo"}:
         native = int(info.get("resolution") or 640)
         return yolo_infer_size(native, speed_key)
@@ -573,7 +724,7 @@ def display_frame_max_side(meta: dict[str, Any] | None = None) -> int:
     return max(int(native), DISPLAY_MAX_SIDE)
 
 
-def library_error(family: str | None = None) -> str | None:
+def library_error(family: str | None = None, backend: str | None = None) -> str | None:
     """Report missing model packages without importing torch into the web process."""
     import importlib.util
     from pathlib import Path as _Path
@@ -583,6 +734,8 @@ def library_error(family: str | None = None) -> str | None:
             return "This is a Hailo HEF model, and hailo_platform is not installed."
         if not _Path("/dev/hailo0").exists():
             return "Hailo-8 device /dev/hailo0 was not found on this kit."
+        if str(backend or "") == "ultralytics" and importlib.util.find_spec("ultralytics") is None:
+            return "This Hailo export needs the YOLO library (ultralytics is not installed)."
         return None
     if importlib.util.find_spec("torch") is None:
         return "The model library is not ready yet (torch is not installed)."

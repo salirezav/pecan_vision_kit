@@ -3,6 +3,7 @@
   const statusEl = document.getElementById("videos-status");
   const saveLabel = document.getElementById("save-dir-label");
   const player = document.getElementById("player");
+  const still = document.getElementById("still");
   const playerLabel = document.getElementById("player-label");
   const usbBanner = document.getElementById("usb-banner");
   const storageBox = document.getElementById("storage-status");
@@ -63,11 +64,40 @@
     }
   }
 
+  function showStill(url) {
+    player.hidden = true;
+    still.hidden = false;
+    still.src = url;
+  }
+
+  function showPlayer(url) {
+    still.hidden = true;
+    still.removeAttribute("src");
+    player.hidden = false;
+    if (url) {
+      player.src = url;
+    }
+  }
+
+  function clearMedia() {
+    stopPlayPoll();
+    try {
+      player.pause();
+    } catch (_) {
+      /* ignore */
+    }
+    player.removeAttribute("src");
+    player.load();
+    player.hidden = false;
+    still.hidden = true;
+    still.removeAttribute("src");
+  }
+
   function renderList() {
     listEl.innerHTML = "";
     if (!videos.length) {
       listEl.innerHTML =
-        '<p class="hint">No videos in this folder yet. Record one from the Record page.</p>';
+        '<p class="hint">No videos or pictures in this folder yet. Record one from the Record page.</p>';
       return;
     }
     for (const video of videos) {
@@ -156,14 +186,7 @@
   }
 
   function stopPlayback() {
-    stopPlayPoll();
-    try {
-      player.pause();
-    } catch (_) {
-      /* ignore */
-    }
-    player.removeAttribute("src");
-    player.load();
+    clearMedia();
   }
 
   function cancelPreviewOnLeave() {
@@ -194,6 +217,27 @@
     setStatus("");
     stopPlayPoll();
     const url = "/videos/watch/" + encodeURIComponent(name) + "?t=" + Date.now();
+    const isImage = item && item.kind === "image";
+
+    if (isImage) {
+      try {
+        player.pause();
+      } catch (_) {
+        /* ignore */
+      }
+      player.removeAttribute("src");
+      player.load();
+      showStill(url);
+      still.onload = () => {
+        playerLabel.textContent = "Viewing: " + name;
+      };
+      still.onerror = () => {
+        playerLabel.textContent = "Could not open: " + name;
+        setStatus("Could not open this picture.", true);
+      };
+      return;
+    }
+
     try {
       const probe = await fetch(url, { method: "GET", headers: { Accept: "application/json" } });
       const contentType = (probe.headers.get("content-type") || "").toLowerCase();
@@ -225,6 +269,9 @@
       setStatus(err.message || String(err), true);
       return;
     }
+    still.hidden = true;
+    still.removeAttribute("src");
+    player.hidden = false;
     player.removeAttribute("src");
     player.load();
     player.src = url;
@@ -259,8 +306,15 @@
       videos = data.videos || [];
       if (selected === oldName) {
         selected = next;
-        player.src = "/videos/watch/" + encodeURIComponent(next);
-        playerLabel.textContent = "Playing: " + next;
+        const item = videos.find((v) => v.name === next);
+        const url = "/videos/watch/" + encodeURIComponent(next) + "?t=" + Date.now();
+        if (item && item.kind === "image") {
+          showStill(url);
+          playerLabel.textContent = "Viewing: " + next;
+        } else {
+          showPlayer(url);
+          playerLabel.textContent = "Playing: " + next;
+        }
       }
       renderList();
       setStatus("Renamed.");
@@ -283,9 +337,8 @@
       videos = data.videos || [];
       if (selected === name) {
         selected = null;
-        player.removeAttribute("src");
-        player.load();
-        playerLabel.textContent = "Select a video to play";
+        clearMedia();
+        playerLabel.textContent = "Select a video or picture";
       }
       renderList();
       setStatus("Deleted.");

@@ -1,12 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Videos — Pecan Vision{% endblock %}
+{% block title %}Videos &amp; Pictures — Pecan Vision{% endblock %}
 {% block content %}
 <section class="videos-layout">
   <section class="panel player-panel">
-    <h1>Recorded videos</h1>
-    <p class="hint">Tap a video to watch it. After recording, files convert to H.264 MP4 (smaller + playable) — wait until conversion finishes. Download keeps a copy on your phone/computer.</p>
+    <h1>Videos &amp; Pictures</h1>
+    <p class="hint">Tap a video to watch it, or a picture to view it. After recording, videos convert to H.264 MP4 (smaller + playable) — wait until conversion finishes. Download keeps a copy on your phone/computer.</p>
     <video id="player" class="video-player" controls playsinline></video>
-    <p id="player-label" class="msg">Select a video to play</p>
+    <img id="still" class="video-player" alt="" hidden>
+    <p id="player-label" class="msg">Select a video or picture</p>
   </section>
 
   <section class="panel list-panel">

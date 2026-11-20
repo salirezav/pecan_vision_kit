@@ -1,6 +1,7 @@
 (function () {
   const startBtn = document.getElementById("btn-start");
   const stopBtn = document.getElementById("btn-stop");
+  const snapBtn = document.getElementById("btn-snap");
   const msg = document.getElementById("msg");
   const badge = document.getElementById("rec-badge");
   const metaFile = document.getElementById("meta-file");
@@ -41,7 +42,8 @@
         }
         stopConvertPoll();
         metaFile.textContent = name;
-        msg.textContent = "Ready: " + name + " — open Videos to watch or download.";
+        msg.textContent =
+          "Ready: " + name + " — open Videos & Pictures to watch or download.";
         msg.className = "msg ok";
       } catch (_) {
         /* ignore transient errors while polling */
@@ -95,6 +97,30 @@
     } else {
       msg.textContent = data.file ? "Saved: " + data.file : "Recording stopped.";
       msg.className = "msg ok";
+    }
+  });
+
+  snapBtn.addEventListener("click", async () => {
+    msg.textContent = "Taking snapshot…";
+    msg.className = "msg";
+    try {
+      const res = await fetch("/api/record/snapshot", { method: "POST" });
+      const data = await res.json();
+      if (data.ok) {
+        const name = (data.file || "").split("/").pop() || data.file;
+        metaFile.textContent = data.file || name;
+        msg.textContent =
+          "Snapshot saved: " +
+          name +
+          " — open Videos & Pictures to view or download.";
+        msg.className = "msg ok";
+      } else {
+        msg.textContent = data.error || "Could not take snapshot.";
+        msg.className = "msg err";
+      }
+    } catch (err) {
+      msg.textContent = err.message || "Could not take snapshot.";
+      msg.className = "msg err";
     }
   });
 

@@ -1075,10 +1075,12 @@ class ReviewVideoService:
 
 
 def list_review_videos(folder: Path) -> list[dict[str, Any]]:
-    """Ready videos only (skip in-progress conversions)."""
+    """Ready videos only (skip in-progress conversions and still images)."""
     rows = []
     for row in list_videos(folder):
         if row.get("status") != "ready":
+            continue
+        if row.get("kind") == "image":
             continue
         rows.append(row)
     return rows

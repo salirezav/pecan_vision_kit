@@ -54,6 +54,13 @@
             {% endfor %}
           </select>
         </label>
+        <div class="review-upload-row">
+          <label class="review-upload-file">Select video
+            <input id="video-file" type="file" accept="video/*,.avi,.mp4,.mkv,.mov,.webm,.m4v">
+          </label>
+          <button id="btn-upload-video" class="btn" type="button">Upload</button>
+        </div>
+        <p class="hint">Uploads go to this kit’s save folder, then appear in the list above.</p>
         <div class="review-sample-row">
           <label>Frames / sec
             <input id="frames-per-sec" type="number" min="0.1" max="60" step="0.1" value="1">

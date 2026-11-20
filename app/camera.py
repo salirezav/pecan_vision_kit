@@ -306,6 +306,25 @@ class CameraService:
             return None
         return buf.tobytes()
 
+    def save_snapshot(self, quality: int = 90) -> str:
+        """Write the latest full-resolution frame as a JPEG in save_dir."""
+        with self._lock:
+            frame = self._frame
+            save_dir = self.save_dir
+            width = self.width
+            height = self.height
+        if frame is None:
+            raise RuntimeError("No camera frame available yet — wait for the preview.")
+        frame = frame.copy()
+        Path(save_dir).mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = Path(save_dir) / f"snap_{stamp}_{width}x{height}.jpg"
+        ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)])
+        if not ok:
+            raise RuntimeError("Could not encode snapshot JPEG.")
+        path.write_bytes(buf.tobytes())
+        return str(path)
+
     def start_recording(self) -> str:
         with self._lock:
             if self._recording:

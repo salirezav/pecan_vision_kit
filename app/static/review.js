@@ -24,6 +24,8 @@
   const sessionEl = document.getElementById("review-session");
   const reviewStatusEl = document.getElementById("review-status");
   const videoSelect = document.getElementById("video-select");
+  const videoFileEl = document.getElementById("video-file");
+  const btnUploadVideo = document.getElementById("btn-upload-video");
   const player = document.getElementById("review-player");
   const playerLabel = document.getElementById("player-label");
   const framesPerSecEl = document.getElementById("frames-per-sec");
@@ -344,7 +346,90 @@
     }
   }
 
+  function reviewReadyVideos(rows) {
+    return (Array.isArray(rows) ? rows : []).filter(
+      (row) => row && row.status === "ready" && row.kind !== "image"
+    );
+  }
+
+  function fillVideoSelect(selectedName) {
+    if (!videoSelect) return;
+    const current = selectedName != null ? selectedName : videoSelect.value;
+    const options = ['<option value="">Choose a video…</option>'].concat(
+      videos.map((row) => {
+        const label =
+          escapeHtml(row.name) +
+          " (" +
+          escapeHtml(String(row.size_mb != null ? row.size_mb : "?")) +
+          " MB)";
+        const selected = row.name === current ? " selected" : "";
+        return (
+          '<option value="' +
+          escapeHtml(row.name) +
+          '"' +
+          selected +
+          ">" +
+          label +
+          "</option>"
+        );
+      })
+    );
+    videoSelect.innerHTML = options.join("");
+    if (current && videos.some((row) => row.name === current)) {
+      videoSelect.value = current;
+    }
+  }
+
+  async function refreshVideos(preferName) {
+    const response = await fetch("/api/videos");
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) {
+      throw new Error((data && data.error) || "Could not refresh the video list.");
+    }
+    videos = reviewReadyVideos(data.videos);
+    fillVideoSelect(preferName || "");
+  }
+
+  async function uploadVideo() {
+    if (!videoFileEl || !videoFileEl.files || !videoFileEl.files.length) {
+      setMsg(setupMsgEl, "Choose a video file first.", true);
+      return;
+    }
+    if (review.running) {
+      setMsg(setupMsgEl, "Finish the current review before uploading.", true);
+      return;
+    }
+    const file = videoFileEl.files[0];
+    const body = new FormData();
+    body.append("file", file, file.name);
+    if (btnUploadVideo) btnUploadVideo.disabled = true;
+    setMsg(setupMsgEl, "Uploading " + file.name + "…");
+    try {
+      const response = await fetch("/api/videos/upload", { method: "POST", body });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) {
+        throw new Error((data && data.error) || "Upload failed.");
+      }
+      videos = reviewReadyVideos(data.review_videos || data.videos);
+      if (!videos.some((row) => row.name === data.name)) {
+        await refreshVideos(data.name);
+      } else {
+        fillVideoSelect(data.name);
+      }
+      videoFileEl.value = "";
+      setMsg(setupMsgEl, "Uploaded " + (data.name || file.name) + ". Ready to review.");
+      selectVideo(data.name || "");
+    } catch (err) {
+      setMsg(setupMsgEl, err.message || String(err), true);
+    } finally {
+      if (btnUploadVideo) btnUploadVideo.disabled = false;
+    }
+  }
+
   function selectVideo(name) {
+    if (videoSelect && name && videoSelect.value !== name) {
+      videoSelect.value = name;
+    }
     playVideo(name);
     loadStill(name);
   }
@@ -668,6 +753,9 @@
 
   if (videoSelect) {
     videoSelect.addEventListener("change", () => selectVideo(videoSelect.value));
+  }
+  if (btnUploadVideo) {
+    btnUploadVideo.addEventListener("click", uploadVideo);
   }
 
   window.addEventListener("pagehide", stopPlayback);

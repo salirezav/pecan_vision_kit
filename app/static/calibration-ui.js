@@ -39,6 +39,7 @@
         current() {
           return emptyRecord([], false);
         },
+        setDisabled() {},
       };
     }
 
@@ -49,6 +50,7 @@
     let record = emptyRecord([], false);
     let saveTimer = null;
     let saving = false;
+    let inputsDisabled = false;
     let onChange = typeof options.onChange === "function" ? options.onChange : null;
     let suppressSave = false;
 
@@ -94,12 +96,40 @@
     }
 
     function scheduleSave() {
-      if (suppressSave) return;
+      if (suppressSave || inputsDisabled) return;
       if (saveTimer) clearTimeout(saveTimer);
       saveTimer = setTimeout(() => {
         saveTimer = null;
         persist();
       }, 250);
+    }
+
+    function applyDisabledState() {
+      sliders.querySelectorAll("input, select, textarea, button").forEach((el) => {
+        el.disabled = inputsDisabled;
+      });
+    }
+
+    function updateHint() {
+      if (!hint) return;
+      if (inputsDisabled) {
+        hint.textContent =
+          "Calibration is locked while a live run is active. Stop the run to edit confidence" +
+          (halfyield ? " or mass / area" : "") +
+          ".";
+      } else if (halfyield) {
+        hint.textContent =
+          "Per-class confidence plus half/piece mass per area. Changes save automatically. Locked during a live run.";
+      } else {
+        hint.textContent =
+          "Per-class confidence. Changes save automatically. Locked during a live run.";
+      }
+    }
+
+    function setDisabled(disabled) {
+      inputsDisabled = Boolean(disabled);
+      applyDisabledState();
+      updateHint();
     }
 
     function addConfidenceSlider(name, value) {
@@ -162,15 +192,7 @@
         emptyRecord(classNames, halfyield);
 
       root.hidden = !usesConfidence || !classNames.length;
-      if (hint) {
-        if (halfyield) {
-          hint.textContent =
-            "Per-class confidence plus half/piece mass per area. Changes save automatically and apply on the next frame.";
-        } else {
-          hint.textContent =
-            "Per-class confidence. Changes save automatically and apply on the next frame.";
-        }
-      }
+      updateHint();
       if (!usesConfidence || !classNames.length) {
         sliders.innerHTML = "";
         return;
@@ -187,6 +209,7 @@
         addMassSlider("cal-mass-half", "Half mass / area", record[MASS_HALF] ?? 0.001);
         addMassSlider("cal-mass-piece", "Piece mass / area", record[MASS_PIECE] ?? 0.001);
       }
+      applyDisabledState();
       suppressSave = false;
     }
 
@@ -196,6 +219,7 @@
       getRecord: () => record,
       saving: () => saving,
       persist,
+      setDisabled,
     };
   }
 

@@ -53,12 +53,27 @@ os.environ.setdefault("HF_HOME", "/mnt/recordings/models/hf")
 os.environ.setdefault("TORCH_HOME", "/mnt/recordings/models/torch")
 os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 
-def _library_error(family: str | None = None) -> str | None:
+def _library_error(family: str | None = None, backend: str | None = None) -> str | None:
     """Import check used only inside the inference worker process."""
     try:
         import torch  # noqa: F401
     except Exception as exc:  # noqa: BLE001
         return f"The model library is not ready yet ({exc})."
+    if family == "hailo":
+        from pathlib import Path as _Path
+
+        try:
+            import hailo_platform  # noqa: F401
+        except Exception as exc:  # noqa: BLE001
+            return f"This is a Hailo HEF model, and hailo_platform is not ready yet ({exc})."
+        if not _Path("/dev/hailo0").exists():
+            return "Hailo-8 device /dev/hailo0 was not found on this kit."
+        if str(backend or "") == "ultralytics":
+            try:
+                import ultralytics  # noqa: F401
+            except Exception as exc:  # noqa: BLE001
+                return f"This Hailo export needs the YOLO library ({exc})."
+        return None
     if family == "ultralytics":
         try:
             import ultralytics  # noqa: F401
@@ -70,6 +85,12 @@ def _library_error(family: str | None = None) -> str | None:
     except Exception as exc:  # noqa: BLE001
         return f"The model library is not ready yet ({exc})."
     return None
+
+
+def _uses_ultralytics_predict(meta: dict[str, Any]) -> bool:
+    family = str(meta.get("family") or "")
+    backend = str(meta.get("backend") or "")
+    return family == "ultralytics" or (family == "hailo" and backend == "ultralytics")
 
 
 def apply_labels(model: Any, labels: list[str]) -> None:
@@ -88,14 +109,21 @@ def apply_labels(model: Any, labels: list[str]) -> None:
 
 
 def _load_model(path: Path, meta: dict[str, Any]) -> Any:
-    family = str(meta.get("family") or inspect_checkpoint(path).get("family") or "rfdetr")
+    info = meta if meta else inspect_checkpoint(path)
+    family = str(info.get("family") or inspect_checkpoint(path).get("family") or "rfdetr")
+    backend = str(info.get("backend") or "")
+    if family == "hailo" and backend == "ultralytics":
+        missing = _library_error(family, backend)
+        if missing:
+            raise RuntimeError(missing)
+        return _load_ultralytics(path, info)
     if family == "hailo":
         from hailo_runtime import load_hailo  # noqa: PLC0415
 
-        return load_hailo(path, meta)
+        return load_hailo(path, info)
     if family == "ultralytics":
-        return _load_ultralytics(path, meta)
-    return _load_rfdetr(path, meta)
+        return _load_ultralytics(path, info)
+    return _load_rfdetr(path, info)
 
 
 def _configure_ultralytics() -> None:
@@ -462,7 +490,24 @@ def predict_frame(
     reference_side = max(1, int(round(native_side * work_long / float(full_long))))
 
     instances: list[dict[str, Any]] = []
-    if family == "hailo":
+    if _uses_ultralytics_predict(meta):
+        if family == "hailo":
+            infer_size = int(meta.get("resolution") or 640)
+        else:
+            infer_size = yolo_infer_size(int(meta.get("resolution") or 640), speed_key)
+        annotated, items, class_areas, instances = _run_ultralytics(
+            model,
+            work,
+            network_threshold,
+            labels,
+            infer_size,
+            task,
+            draw=draw,
+            reference_side=reference_side,
+            class_thresholds=per_class,
+            roi=clipped,
+        )
+    elif family == "hailo":
         from hailo_runtime import run_hailo  # noqa: PLC0415
 
         annotated, items, class_areas, instances = run_hailo(
@@ -470,20 +515,6 @@ def predict_frame(
             work,
             network_threshold,
             labels,
-            task,
-            draw=draw,
-            reference_side=reference_side,
-            class_thresholds=per_class,
-            roi=clipped,
-        )
-    elif family == "ultralytics":
-        infer_size = yolo_infer_size(int(meta.get("resolution") or 640), speed_key)
-        annotated, items, class_areas, instances = _run_ultralytics(
-            model,
-            work,
-            network_threshold,
-            labels,
-            infer_size,
             task,
             draw=draw,
             reference_side=reference_side,
@@ -597,7 +628,7 @@ def predict_roi_frame(
         raise RuntimeError("Could not read the video frame.")
     started = time.perf_counter()
     family = str(meta.get("family") or "ultralytics")
-    if family != "ultralytics":
+    if not _uses_ultralytics_predict(meta):
         raise RuntimeError("Half-yield needs a YOLO segmentation model.")
     task = str(meta.get("task") or "segment")
     if task not in {"segment", "semantic"}:
@@ -636,12 +667,18 @@ def predict_roi_frame(
     if clipped is None:
         raise RuntimeError("The measurement region does not fit this frame.")
 
+    # Ultralytics Hailo HEFs are compiled for a fixed input size (640 on this kit).
+    infer_size = (
+        int(meta.get("resolution") or 640)
+        if family == "hailo"
+        else int(model_size)
+    )
     x1 = clipped["x"]
     y1 = clipped["y"]
     x2 = x1 + clipped["w"]
     y2 = y1 + clipped["h"]
     crop = frame[y1:y2, x1:x2]
-    resized = cv2.resize(crop, (int(model_size), int(model_size)), interpolation=cv2.INTER_LINEAR)
+    resized = cv2.resize(crop, (infer_size, infer_size), interpolation=cv2.INTER_LINEAR)
 
     class_thresh = {
         "half": float(thresholds.get("half", 0.30)),
@@ -652,7 +689,7 @@ def predict_roi_frame(
     base_conf = min(class_thresh.values())
     results = model.predict(
         resized,
-        imgsz=int(model_size),
+        imgsz=infer_size,
         device="cpu",
         verbose=False,
         stream=False,

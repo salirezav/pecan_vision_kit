@@ -62,7 +62,7 @@
     <div><dt>Free</dt><dd>{{ disk.free_gb }} GB / {{ disk.total_gb }} GB</dd></div>
   </dl>
   {% endif %}
-  <h3>Recent videos</h3>
+  <h3>Recent videos and pictures</h3>
   <ul class="file-list">
     {% for v in videos %}
     <li><code>{{ v.name }}</code> — {{ v.size_mb }} MB — {{ v.mtime }}</li>

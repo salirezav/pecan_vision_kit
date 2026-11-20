@@ -23,7 +23,10 @@ from segment_inspect import (
     ModelBusy,
     _finish_names,
     describe_model,
+    extract_hailo_export_zip,
     inspect_checkpoint,
+    inspect_hailo_export_dir,
+    is_hailo_export_dir,
     label_slots,
     library_error,
     parse_class_names,
@@ -33,22 +36,51 @@ from yield_measure import Calibration, area_share, is_halfyield_classes
 
 MAX_METRICS = 8
 _WEIGHT_SUFFIXES = frozenset({".pt", ".pth", ".hef"})
+_UPLOAD_SUFFIXES = frozenset({".pt", ".pth", ".hef", ".zip"})
+_HAILO_DIR_SUFFIX = "_hailo_model"
+
+
+def _safe_stem(raw: str) -> str:
+    cleaned: list[str] = []
+    for char in raw:
+        cleaned.append(char if char.isalnum() or char in "-_" else "-")
+    safe = "".join(cleaned).strip("-")
+    while "--" in safe:
+        safe = safe.replace("--", "-")
+    return safe[:80] or "model"
 
 
 def library_weights_name(filename: str) -> str:
     """Safe file name for a weights upload stored in the model library."""
     raw = Path(str(filename or "")).name
     suffix = Path(raw).suffix.lower()
-    if suffix not in _WEIGHT_SUFFIXES:
-        raise ValueError("Upload a .pt, .pth, or .hef weights file.")
-    cleaned: list[str] = []
-    for char in Path(raw).stem:
-        cleaned.append(char if char.isalnum() or char in "-_" else "-")
-    safe = "".join(cleaned).strip("-")
-    while "--" in safe:
-        safe = safe.replace("--", "-")
-    safe = (safe[:80] or "model")
-    return f"{safe}{suffix}"
+    if suffix not in _UPLOAD_SUFFIXES:
+        raise ValueError("Upload a .pt, .pth, .hef, or Hailo export .zip weights file.")
+    if suffix == ".zip":
+        stem = _safe_stem(Path(raw).stem)
+        if not stem.endswith(_HAILO_DIR_SUFFIX):
+            stem = f"{stem}{_HAILO_DIR_SUFFIX}"
+        return stem
+    return f"{_safe_stem(Path(raw).stem)}{suffix}"
+
+
+def _entry_bytes(path: Path) -> int:
+    if path.is_file():
+        return int(path.stat().st_size)
+    if path.is_dir():
+        total = 0
+        for child in path.rglob("*"):
+            if child.is_file():
+                try:
+                    total += int(child.stat().st_size)
+                except OSError:
+                    continue
+        return total
+    return 0
+
+
+def _is_installed_entry(path: Path) -> bool:
+    return path.is_file() or is_hailo_export_dir(path)
 
 # Re-export for server.py and callers.
 __all__ = [
@@ -126,16 +158,18 @@ class ModelService:
         self.active_path().write_text(json.dumps({"id": weights_name}, indent=2))
 
     def _is_library_weights(self, path: Path) -> bool:
-        if not path.is_file() or path.name.startswith("."):
-            return False
-        if path.suffix.lower() not in _WEIGHT_SUFFIXES:
+        if path.name.startswith("."):
             return False
         try:
             resolved = path.resolve()
             root = self.library_dir().resolve()
         except OSError:
             return False
-        return resolved.parent == root
+        if resolved.parent != root:
+            return False
+        if path.is_file():
+            return path.suffix.lower() in _WEIGHT_SUFFIXES
+        return is_hailo_export_dir(path)
 
     def _weight_files(self) -> list[Path]:
         folder = self.library_dir()
@@ -317,7 +351,7 @@ class ModelService:
                 {
                     "id": path.name,
                     "filename": meta.get("filename") or path.name,
-                    "bytes": path.stat().st_size,
+                    "bytes": _entry_bytes(path),
                     "active": path.name == active_id,
                     "family": meta.get("family"),
                     "task": meta.get("task"),
@@ -339,15 +373,19 @@ class ModelService:
             self._error = str(exc)
         path = self.weights_path()
         meta = self._read_meta()
-        installed = path.is_file()
+        installed = _is_installed_entry(path)
         family = str(meta.get("family") or "rfdetr")
+        backend = str(meta.get("backend") or "") if installed else ""
         num_classes = meta.get("num_classes")
         described = installed and bool(meta.get("family") or meta.get("task"))
         view = describe_model(meta) if described else {}
         if installed and meta.get("inspect_error") and not described:
             lib_error = None
         else:
-            lib_error = library_error(family if described else "rfdetr")
+            lib_error = library_error(
+                family if described else "rfdetr",
+                backend if described else None,
+            )
         active_id = path.name if installed else None
         class_names = [str(name) for name in (meta.get("class_names") or [])] if installed else []
         halfyield = bool(installed and is_halfyield_classes(class_names))
@@ -360,7 +398,7 @@ class ModelService:
             "library_path": str(self.library_dir()),
             "models": self._model_rows(active_id),
             "filename": meta.get("filename") if installed else None,
-            "bytes": path.stat().st_size if installed else 0,
+            "bytes": _entry_bytes(path) if installed else 0,
             "family": meta.get("family") if installed else None,
             "task": meta.get("task") if installed else None,
             "num_classes": num_classes if installed else None,
@@ -386,7 +424,7 @@ class ModelService:
     def get_calibration(self) -> dict[str, Any]:
         self.ensure_seeded()
         path = self.weights_path()
-        if not path.is_file():
+        if not _is_installed_entry(path):
             raise ValueError("Upload a model first.")
         meta = self._read_meta()
         names = [str(name) for name in (meta.get("class_names") or [])]
@@ -395,13 +433,19 @@ class ModelService:
     def save_calibration(self, raw: Any) -> dict[str, Any]:
         self.ensure_seeded()
         path = self.weights_path()
-        if not path.is_file():
+        if not _is_installed_entry(path):
             raise ValueError("Upload a model first.")
         meta = self._read_meta()
         names = [str(name) for name in (meta.get("class_names") or [])]
         if not names:
             raise ValueError("Save class names on the model before calibrating.")
         return calibration_store.save(path.name, raw, names)
+
+    def _remove_library_entry(self, path: Path) -> None:
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+        elif path.is_dir():
+            shutil.rmtree(path)
 
     def install_upload(self, payload: bytes, filename: str, class_names_raw: str) -> dict[str, Any]:
         if self._infer.busy:
@@ -412,14 +456,35 @@ class ModelService:
             raise ValueError("That file is too large (limit 800 MB).")
         dest_name = library_weights_name(filename)
         self.library_dir().mkdir(parents=True, exist_ok=True)
-        temp = self.library_dir() / f".upload-{uuid.uuid4().hex}{Path(dest_name).suffix}"
-        temp.write_bytes(payload)
+        suffix = Path(str(filename or "")).suffix.lower()
+        staging = self.library_dir() / f".upload-{uuid.uuid4().hex}"
         try:
-            info = inspect_checkpoint(temp)
-            dest = self.library_dir() / dest_name
-            if dest.exists() or dest.is_symlink():
-                dest.unlink()
-            temp.replace(dest)
+            if suffix == ".zip":
+                zip_path = staging.with_suffix(".zip")
+                zip_path.write_bytes(payload)
+                try:
+                    extract_hailo_export_zip(zip_path, staging)
+                finally:
+                    if zip_path.exists():
+                        zip_path.unlink()
+                info = inspect_hailo_export_dir(staging)
+                dest = self.library_dir() / dest_name
+                if dest.exists() or dest.is_symlink():
+                    self._remove_library_entry(dest)
+                staging.rename(dest)
+            else:
+                temp = staging.with_suffix(Path(dest_name).suffix or ".bin")
+                temp.write_bytes(payload)
+                try:
+                    info = inspect_checkpoint(temp)
+                    dest = self.library_dir() / dest_name
+                    if dest.exists() or dest.is_symlink():
+                        self._remove_library_entry(dest)
+                    temp.replace(dest)
+                except Exception:
+                    if temp.exists():
+                        temp.unlink()
+                    raise
             meta = _finish_names(info, split_names(class_names_raw))
             meta["filename"] = Path(filename).name
             meta["weights_file"] = dest_name
@@ -427,8 +492,8 @@ class ModelService:
             self._sidecar(dest_name).write_text(json.dumps(meta, indent=2))
             self._set_active(dest_name)
         except Exception:
-            if temp.exists():
-                temp.unlink()
+            if staging.exists():
+                self._remove_library_entry(staging)
             raise
         self._loaded = False
         self._error = None
@@ -440,7 +505,10 @@ class ModelService:
         name = Path(str(model_id or "")).name
         if not name or name != str(model_id or "").strip() or name.startswith("."):
             raise ValueError("Choose a model from the list.")
-        if Path(name).suffix.lower() not in _WEIGHT_SUFFIXES:
+        suffix = Path(name).suffix.lower()
+        if suffix and suffix not in _WEIGHT_SUFFIXES:
+            raise ValueError("Choose a model from the list.")
+        if not suffix and not name.endswith(_HAILO_DIR_SUFFIX):
             raise ValueError("Choose a model from the list.")
         self.ensure_seeded()
         path = self.library_dir() / name
@@ -457,14 +525,17 @@ class ModelService:
         name = Path(str(model_id or "")).name
         if not name or name != str(model_id or "").strip() or name.startswith("."):
             raise ValueError("Choose a model from the list.")
-        if Path(name).suffix.lower() not in _WEIGHT_SUFFIXES:
+        suffix = Path(name).suffix.lower()
+        if suffix and suffix not in _WEIGHT_SUFFIXES:
+            raise ValueError("Choose a model from the list.")
+        if not suffix and not name.endswith(_HAILO_DIR_SUFFIX):
             raise ValueError("Choose a model from the list.")
         self.ensure_seeded()
         path = self.library_dir() / name
         if not self._is_library_weights(path):
             raise ValueError("That model is not on this kit.")
         was_active = self._active_id() == name
-        path.unlink()
+        self._remove_library_entry(path)
         sidecar = self._sidecar(name)
         if sidecar.is_symlink() or sidecar.is_file():
             sidecar.unlink()
@@ -484,7 +555,7 @@ class ModelService:
             raise ModelBusy("The model is already working. Wait for it to finish.")
         self.ensure_seeded()
         path = self.weights_path()
-        if not path.is_file():
+        if not _is_installed_entry(path):
             raise ValueError("Upload a model first.")
         meta = self._read_meta()
         family = str(meta.get("family") or inspect_checkpoint(path).get("family") or "rfdetr")
@@ -626,7 +697,7 @@ class ModelService:
             raise RuntimeError("The camera does not have a frame yet.")
         self.ensure_seeded()
         path = self.weights_path()
-        if not path.is_file():
+        if not _is_installed_entry(path):
             raise RuntimeError("Upload a model first.")
         meta = self._read_meta()
         class_names = [str(name) for name in (meta.get("class_names") or [])]

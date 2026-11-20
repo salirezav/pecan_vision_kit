@@ -7,13 +7,16 @@ import mimetypes
 from flask import Blueprint, jsonify, request, send_file
 
 from convert import cancel_preview_jobs, read_job
+from review_video import list_review_videos
 from storage import (
+    IMAGE_EXTENSIONS,
     analyze_storage_for_recording,
     delete_preview_for,
     ensure_browser_playable,
     list_directory,
     list_videos,
     list_volumes,
+    save_video_upload,
     video_path_in_folder,
 )
 import runtime as rt
@@ -25,6 +28,32 @@ bp = Blueprint("library", __name__)
 def api_videos():
     folder = rt.current_save_dir()
     return jsonify({"ok": True, "save_dir": str(folder), "videos": list_videos(folder)})
+
+
+@bp.route("/api/videos/upload", methods=["POST"])
+def api_videos_upload():
+    upload = request.files.get("file") or request.files.get("video")
+    if upload is None or not upload.filename:
+        return jsonify({"ok": False, "error": "Choose a video file to upload."}), 400
+    try:
+        if rt.review_video.is_running():
+            return jsonify(
+                {"ok": False, "error": "Finish the video review before uploading."}
+            ), 409
+        folder = rt.current_save_dir()
+        path = save_video_upload(folder, upload, upload.filename)
+        return jsonify(
+            {
+                "ok": True,
+                "name": path.name,
+                "path": str(path),
+                "save_dir": str(folder),
+                "videos": list_videos(folder),
+                "review_videos": list_review_videos(folder),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc)}), 400
 
 @bp.route("/api/videos/rename", methods=["POST"])
 def api_videos_rename():
@@ -65,7 +94,18 @@ def videos_watch(name: str):
     try:
         folder = rt.current_save_dir()
         path = video_path_in_folder(folder, name)
-        if path.suffix.lower() == ".mp4":
+        if not path.exists():
+            return jsonify({"ok": False, "error": "File not found."}), 404
+        suffix = path.suffix.lower()
+        if suffix in IMAGE_EXTENSIONS:
+            mime, _ = mimetypes.guess_type(str(path))
+            return send_file(
+                path,
+                mimetype=mime or "image/jpeg",
+                conditional=True,
+                download_name=path.name,
+            )
+        if suffix == ".mp4":
             job = read_job(path)
             if job and job.get("status") == "converting":
                 return jsonify(
@@ -75,8 +115,6 @@ def videos_watch(name: str):
                         "converting": True,
                     }
                 ), 409
-        if not path.exists():
-            return jsonify({"ok": False, "error": "Video not found."}), 404
         # Prefer finalized H.264 MP4; legacy AVI still gets a queued preview.
         playable = ensure_browser_playable(path)
         if isinstance(playable, dict):

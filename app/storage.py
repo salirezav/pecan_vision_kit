@@ -15,6 +15,8 @@ from typing import Any
 from convert import list_active_jobs, preview_cache_path, queue_preview, read_job
 
 VIDEO_EXTENSIONS = {".avi", ".mp4", ".mkv", ".mov", ".webm", ".m4v"}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+MEDIA_EXTENSIONS = VIDEO_EXTENSIONS | IMAGE_EXTENSIONS
 SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\- ]{0,180}$")
 
 # Paths users may browse / pick as save folders.
@@ -186,7 +188,7 @@ def list_directory(path: str | Path) -> dict[str, Any]:
                     folders.append({"name": name, "path": str(Path(resolved) / name)})
                 elif entry.is_file(follow_symlinks=False):
                     suffix = Path(name).suffix.lower()
-                    if suffix in VIDEO_EXTENSIONS:
+                    if suffix in MEDIA_EXTENSIONS:
                         stat = entry.stat(follow_symlinks=False)
                         files.append(
                             {
@@ -241,6 +243,7 @@ def list_videos(folder: str | Path, limit: int = 200) -> list[dict[str, Any]]:
                 "mtime": mtime,
                 "mtime_text": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime)),
                 "status": "converting",
+                "kind": "video",
                 "playable": False,
                 "downloadable": False,
                 "message": job.get("message")
@@ -255,10 +258,12 @@ def list_videos(folder: str | Path, limit: int = 200) -> list[dict[str, Any]]:
         # Ignore ffmpeg temp outputs and status sidecars
         if ".partial." in name_lower or name_lower.endswith(".converting.json"):
             continue
-        if item.suffix.lower() not in VIDEO_EXTENSIONS:
+        suffix = item.suffix.lower()
+        if suffix not in MEDIA_EXTENSIONS:
             continue
+        is_image = suffix in IMAGE_EXTENSIONS
         # Hide raw AVI while/after queued conversion to matching MP4
-        if item.suffix.lower() == ".avi":
+        if not is_image and suffix == ".avi":
             dest = item.with_suffix(".mp4")
             job = read_job(dest)
             if job and job.get("status") == "converting":
@@ -271,8 +276,12 @@ def list_videos(folder: str | Path, limit: int = 200) -> list[dict[str, Any]]:
             stat = item.stat()
         except OSError:
             continue
-        suffix = item.suffix.lower()
-        playable = suffix in {".mp4", ".webm", ".m4v"} or suffix == ".avi"
+        if is_image:
+            playable = True
+            kind = "image"
+        else:
+            playable = suffix in {".mp4", ".webm", ".m4v"} or suffix == ".avi"
+            kind = "video"
         videos.append(
             {
                 "name": item.name,
@@ -283,6 +292,7 @@ def list_videos(folder: str | Path, limit: int = 200) -> list[dict[str, Any]]:
                     "%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime)
                 ),
                 "status": "ready",
+                "kind": kind,
                 "playable": playable,
                 "downloadable": True,
                 "message": "",
@@ -300,9 +310,59 @@ def validate_video_name(name: str) -> str:
         raise ValueError("Invalid file name.")
     if not SAFE_NAME.match(base):
         raise ValueError("Use letters, numbers, spaces, dots, dashes, or underscores.")
-    if Path(base).suffix.lower() not in VIDEO_EXTENSIONS:
-        raise ValueError("File must be a video type (.avi, .mp4, …).")
+    if Path(base).suffix.lower() not in MEDIA_EXTENSIONS:
+        raise ValueError("File must be a video or picture (.avi, .mp4, .jpg, …).")
     return base
+
+
+def safe_video_upload_name(filename: str) -> str:
+    """Sanitize an upload filename to a kit-safe video name."""
+    base = Path(str(filename or "")).name
+    suffix = Path(base).suffix.lower()
+    if suffix not in VIDEO_EXTENSIONS:
+        raise ValueError("Upload a video file (.avi, .mp4, .mkv, .mov, .webm, .m4v).")
+    stem = Path(base).stem
+    cleaned = re.sub(r"[^A-Za-z0-9._\- ]+", "-", stem).strip(" .-_") or "upload"
+    cleaned = cleaned[:160]
+    return validate_video_name(f"{cleaned}{suffix}")
+
+
+def unique_video_path(folder: str | Path, filename: str) -> Path:
+    """Return a free path under folder for filename, adding -2, -3, … if needed."""
+    folder_path = ensure_allowed_dir(folder)
+    safe = safe_video_upload_name(filename)
+    path = video_path_in_folder(folder_path, safe)
+    if not path.exists():
+        return path
+    stem = path.stem
+    suffix = path.suffix
+    for index in range(2, 1000):
+        candidate = video_path_in_folder(folder_path, f"{stem}-{index}{suffix}")
+        if not candidate.exists():
+            return candidate
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    return video_path_in_folder(folder_path, f"{stem}-{stamp}{suffix}")
+
+
+def save_video_upload(folder: str | Path, upload: Any, filename: str | None = None) -> Path:
+    """Stream an uploaded video into the save folder. `upload` is a Werkzeug FileStorage."""
+    name = filename or getattr(upload, "filename", "") or ""
+    dest = unique_video_path(folder, name)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    staging = dest.with_name(f".upload-{dest.name}.{os.getpid()}")
+    try:
+        upload.save(str(staging))
+        if staging.stat().st_size <= 0:
+            raise ValueError("That upload was empty.")
+        staging.replace(dest)
+    except Exception:
+        try:
+            if staging.exists():
+                staging.unlink()
+        except OSError:
+            pass
+        raise
+    return dest
 
 
 def video_path_in_folder(folder: str | Path, name: str) -> Path:

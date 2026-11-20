@@ -312,6 +312,17 @@ h1, h2, .reading {
 .btn:hover { background: var(--uga-surface); }
 .btn.start { background: var(--start); color: #fff; border-color: var(--start); font-size: 1.35rem; padding: 1.2rem; }
 .btn.stop { background: var(--stop); color: #fff; border-color: var(--stop); font-size: 1.35rem; padding: 1.2rem; }
+.btn.snap {
+  background: var(--uga-control);
+  color: var(--ink);
+  border-color: var(--line);
+  font-size: 1.35rem;
+  padding: 1.2rem;
+}
+.btn.snap:hover:not(:disabled) {
+  background: var(--uga-stegeman);
+  color: var(--uga-white);
+}
 .btn.primary { background: var(--uga-red); color: #fff; border-color: var(--uga-red); }
 .btn.primary:hover { background: var(--uga-red-dark); }
 .btn.small { padding: 0.45rem 0.7rem; font-size: 0.9rem; min-height: 0; }
@@ -523,6 +534,10 @@ input, select {
   background: #000;
   border-radius: 12px;
   border: 1px solid var(--line);
+}
+img.video-player {
+  object-fit: contain;
+  display: block;
 }
 .list-header {
   display: flex;
@@ -1543,6 +1558,16 @@ input[type="file"] { padding: 0.45rem; }
   display: grid;
   gap: 0.35rem;
   font-weight: 600;
+}
+.review-upload-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.65rem;
+  align-items: end;
+}
+.review-upload-file input[type="file"] {
+  width: 100%;
+  max-width: 100%;
 }
 .review-sample-row {
   display: grid;

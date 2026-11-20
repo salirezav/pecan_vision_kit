@@ -1044,7 +1044,15 @@
   formEl.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!fileEl.files || !fileEl.files[0]) {
-      setMsg("Choose a .pt, .pth, or .hef weights file first.", "err");
+      setMsg("Choose a .pt, .pth, .hef, or Hailo export .zip weights file first.", "err");
+      return;
+    }
+    const uploadName = String(fileEl.files[0].name || "");
+    const uploadSuffix = uploadName.includes(".")
+      ? uploadName.slice(uploadName.lastIndexOf(".")).toLowerCase()
+      : "";
+    if (![".pt", ".pth", ".hef", ".zip"].includes(uploadSuffix)) {
+      setMsg("Choose a .pt, .pth, .hef, or Hailo export .zip weights file.", "err");
       return;
     }
     const body = new FormData();

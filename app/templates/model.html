@@ -43,7 +43,8 @@
 
         <form id="upload-form" class="form-grid">
           <label class="wide">Weights file
-            <input id="weights-file" name="file" type="file" accept=".pt,.pth,.hef">
+            <input id="weights-file" name="file" type="file" accept=".pt,.pth,.hef,.zip,application/zip,application/x-zip-compressed">
+            <span class="hint">Accepts .pt / .pth, .hef, or a Hailo export .zip (HEF + metadata.yaml).</span>
           </label>
           <label id="names-field" class="wide">Class names, in order
             <input id="class-names" name="class_names" type="text" placeholder="Leave blank to use the names stored in the file" autocomplete="off">

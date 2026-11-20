@@ -105,6 +105,14 @@ def api_record_stop():
         }
     )
 
+@bp.route("/api/record/snapshot", methods=["POST"])
+def api_record_snapshot():
+    try:
+        path = rt.require_cam().save_snapshot()
+        return jsonify({"ok": True, "file": path})
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
 @bp.route("/video_feed")
 def video_feed():
     def generate():

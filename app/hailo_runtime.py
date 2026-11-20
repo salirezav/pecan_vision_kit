@@ -96,6 +96,11 @@ def _detect_postprocess_kind(output_infos: list[Any]) -> str:
     shapes = [tuple(getattr(info, "shape", ())) for info in output_infos]
     if any("nms_postprocess" in name for name in names):
         return "nms"
+    # Ultralytics YOLOv8/YOLO11-seg HEF: reg/cls/coeff × 3 scales + proto (10 tensors).
+    # A lone .hef of this layout needs the export folder (metadata.yaml), not this decoder.
+    proto_like = sum(1 for shape in shapes if len(shape) == 3 and int(shape[-1]) == 32)
+    if len(output_infos) >= 10 and proto_like >= 4:
+        return "ultralytics_seg"
     if len(output_infos) >= 4 and any(len(shape) == 3 and shape[-1] == 32 for shape in shapes):
         return "yolov5_seg"
     return "raw"
@@ -118,6 +123,11 @@ def inspect_hef(path: Path) -> dict[str, Any]:
     input_info = hef.get_input_vstream_infos()[0]
     outputs = list(hef.get_output_vstream_infos())
     kind = _detect_postprocess_kind(outputs)
+    if kind == "ultralytics_seg":
+        raise ValueError(
+            "This HEF is a Ultralytics YOLOv8/YOLO11 segmentation export. "
+            "Upload the export zip (HEF + metadata.yaml), not the .hef alone."
+        )
     height, width = int(input_info.shape[0]), int(input_info.shape[1])
     num_classes = 80
     task = "detect"
@@ -145,6 +155,7 @@ def inspect_hef(path: Path) -> dict[str, Any]:
         "input_width": width,
         "num_classes": num_classes,
         "hef_postprocess": kind,
+        "backend": "hailort",
         "names_from_file": False,
         "class_names": [],
     }
@@ -372,7 +383,8 @@ def run_hailo(
     else:
         raise RuntimeError(
             "This HEF output layout is not supported yet. "
-            "Use a YOLO HEF with on-chip NMS (detect) or yolov5-seg raw heads."
+            "Use a YOLO HEF with on-chip NMS (detect), yolov5-seg raw heads, "
+            "or upload a Ultralytics YOLOv8/YOLO11-seg export zip for Hailo-8."
         )
 
     if class_thresholds:

@@ -242,3 +242,6 @@
 [2026-11-13 10:21:31.040] [3914] [HailoRT] [info] [core_op.cpp:186] [deactivate] Deactivating took 0.451036 ms
 [2026-11-13 10:21:31.040] [3914] [HailoRT] [info] [core_op.cpp:186] [deactivate] Deactivating took 0.460368 ms
 [2026-11-13 10:21:31.040] [3914] [HailoRT] [info] [hef.cpp:1994] [get_network_group_and_network_name] No name was given. Addressing all networks of default network_group: yolov5n_seg
+[2026-11-20 09:31:49.774] [305067] [HailoRT] [info] [device.cpp:51] [Device] OS Version: Linux 6.18.50+rpt-rpi-2712 #1 SMP PREEMPT Debian 1:6.18.50-1+rpt1 (2026-09-11) aarch64
+[2026-11-20 09:31:49.776] [305067] [HailoRT] [info] [control.cpp:113] [control__parse_identify_results] firmware_version is: 4.23.0
+[2026-11-20 09:31:49.777] [305067] [HailoRT] [info] [control.cpp:113] [control__parse_identify_results] firmware_version is: 4.23.0

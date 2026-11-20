@@ -327,6 +327,10 @@
     startBtn.disabled = live || !ready;
     stopBtn.disabled = !live;
     resetBtn.disabled = live;
+    if (speedEl) speedEl.disabled = live;
+    if (calibration && typeof calibration.setDisabled === "function") {
+      calibration.setDisabled(live);
+    }
   }
 
   function showResult(imageUrl) {
