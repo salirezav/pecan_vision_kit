@@ -76,6 +76,7 @@ This script can:
   4) Configure always-on Wi‑Fi Access Point (config network)
   5) Write kit id / sticker info
   6) Enable Chromium kiosk autostart (monitor)
+  7) Install Desktop Start / Update / Setup launchers
 
 EOF
 }
@@ -213,9 +214,8 @@ install_service() {
   local tmp
   tmp="$(mktemp)"
   sed \
-    -e "s|/home/engr-ugaif/pecan-vision-kit|$KIT_ROOT|g" \
-    -e "s|^User=engr-ugaif|User=$USER_NAME|" \
-    -e "s|^Group=engr-ugaif|Group=$USER_NAME|" \
+    -e "s|@KIT_ROOT@|$KIT_ROOT|g" \
+    -e "s|@KIT_USER@|$USER_NAME|g" \
     "$SERVICE_SRC" > "$tmp"
   sudo cp "$tmp" /etc/systemd/system/pecan-vision.service
   rm -f "$tmp"
@@ -223,8 +223,8 @@ install_service() {
   local sudoers_tmp
   sudoers_tmp="$(mktemp)"
   sed \
-    -e "s|/home/engr-ugaif/pecan-vision-kit|$KIT_ROOT|g" \
-    -e "s|^engr-ugaif |$USER_NAME |" \
+    -e "s|@KIT_ROOT@|$KIT_ROOT|g" \
+    -e "s|@KIT_USER@|$USER_NAME|g" \
     "$SUDOERS_SRC" > "$sudoers_tmp"
   sudo cp "$sudoers_tmp" /etc/sudoers.d/pecan-vision
   sudo chmod 440 /etc/sudoers.d/pecan-vision
@@ -398,7 +398,8 @@ main_menu() {
   say "  5) Access Point only"
   say "  6) Camera + VNC checks only"
   say "  7) Chromium kiosk only"
-  say "  8) Quit"
+  say "  8) Desktop launchers only"
+  say "  9) Quit"
   local choice
   choice="$(ask "Selection" "1")"
 
@@ -413,6 +414,7 @@ main_menu() {
       verify_camera
       ensure_vnc_hint
       configure_kiosk
+      "$KIT_ROOT/scripts/install-desktop-launchers.sh" || warn "Desktop launchers skipped"
       ;;
     2) install_packages; setup_venv ;;
     3) prepare_nvme ;;
@@ -420,7 +422,12 @@ main_menu() {
     5) configure_ap ;;
     6) verify_camera; ensure_vnc_hint ;;
     7) configure_kiosk ;;
-    8) say "Bye."; exit 0 ;;
+    8)
+      if [[ -x "$KIT_ROOT/scripts/install-desktop-launchers.sh" ]]; then
+        "$KIT_ROOT/scripts/install-desktop-launchers.sh" || warn "Desktop launchers skipped"
+      fi
+      ;;
+    9) say "Bye."; exit 0 ;;
     *) err "Unknown selection"; exit 1 ;;
   esac
 
@@ -431,6 +438,7 @@ Next:
   • Open http://10.42.0.1:8080 (from phone on the kit AP)
     or http://localhost:8080 (on the Pi)
   • Admin / restart UI: http://…:8080/admin
+  • Desktop launchers: Start / Update / Setup Pecan Vision
   • Docs: $KIT_ROOT/docs/
 
 EOF

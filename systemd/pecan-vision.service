@@ -6,10 +6,10 @@ RequiresMountsFor=/mnt/recordings
 
 [Service]
 Type=simple
-User=engr-ugaif
-Group=engr-ugaif
-WorkingDirectory=/home/engr-ugaif/pecan-vision-kit/app
-ExecStart=/home/engr-ugaif/pecan-vision-kit/.venv/bin/python /home/engr-ugaif/pecan-vision-kit/app/server.py
+User=@KIT_USER@
+Group=@KIT_USER@
+WorkingDirectory=@KIT_ROOT@/app
+ExecStart=@KIT_ROOT@/.venv/bin/python @KIT_ROOT@/app/server.py
 Restart=on-failure
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1

@@ -13,8 +13,10 @@ WayVNC is part of Raspberry Pi OS and is already enabled on the first kit.
 
 1. Connect to the Pi (config AP or plant Ethernet).
 2. Use RealVNC Viewer / TigerVNC / similar → Pi IP (`10.42.0.1` on the AP).
-3. Log in as the kit user.
+3. Log in as the kit user (`pecan` on shipped kits — never a shared campus account).
 4. Open a terminal or browser as needed.
+
+Provisioning, passwords, and Desktop launchers: see [KIT-PROVISIONING.md](KIT-PROVISIONING.md).
 
 Useful terminal commands:
 
@@ -34,13 +36,22 @@ nmcli connection show
 ## Service name
 
 - Unit file: `pecan-vision.service`
-- App path: `~/pecan-vision-kit/app/server.py`
+- Kit user (shipped): `pecan`
+- App path: `~/pecan-vision-kit/app/server.py` (canonical; not on the Desktop)
 - Virtualenv: `~/pecan-vision-kit/.venv`
 - Version file: `~/pecan-vision-kit/VERSION` (footer shows `0.x preview` until 1.0.0)
 
+## Desktop launchers
+
+After bootstrap (or `./scripts/install-desktop-launchers.sh`), the kit Desktop has:
+
+- **Start Pecan Vision** — ensure clone/deps/service, open the UI
+- **Update Pecan Vision** — same GitHub Releases path as the dashboard banner
+- **Setup / Repair Pecan Vision** — interactive `setup-kit.sh`
+
 ## Software updates
 
-The dashboard checks [GitHub Releases](https://github.com/salirezav/pecan_vision_kit/releases) about once an hour when the kit can reach the internet (usually Ethernet). If a newer release exists, every page shows a banner with **Update**.
+The dashboard checks [GitHub Releases](https://github.com/salirezav/pecan_vision_kit/releases) about once an hour when the kit can reach the internet (usually Ethernet). If a newer release exists, every page shows a banner with **Update**. You can also use the Desktop **Update Pecan Vision** launcher.
 
 On click, `scripts/apply-update.sh` downloads the release tarball, verifies `SHA256SUMS` when present, backs up the current app tree, installs the new files, refreshes Python deps, restarts `pecan-vision`, and rolls back if the health check fails.
 

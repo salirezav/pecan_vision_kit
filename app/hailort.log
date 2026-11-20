@@ -71,3 +71,78 @@
 [2026-11-13 10:23:34.659] [4841] [HailoRT] [info] [core_op.cpp:186] [deactivate] Deactivating took 0.578534 ms
 [2026-11-20 11:35:22.085] [335545] [HailoRT] [info] [hef.cpp:1994] [get_network_group_and_network_name] No name was given. Addressing all networks of default network_group: best
 [2026-11-20 11:35:22.085] [335545] [HailoRT] [info] [hef.cpp:1994] [get_network_group_and_network_name] No name was given. Addressing all networks of default network_group: best
+[2026-11-20 12:27:00.706] [336235] [HailoRT] [info] [hef.cpp:1994] [get_network_group_and_network_name] No name was given. Addressing all networks of default network_group: best
+[2026-11-20 12:27:00.706] [336235] [HailoRT] [info] [hef.cpp:1994] [get_network_group_and_network_name] No name was given. Addressing all networks of default network_group: best
+[2026-11-20 12:27:00.924] [336235] [HailoRT] [info] [vdevice.cpp:535] [create] Creating vdevice with params: device_count: 1, scheduling_algorithm: NONE, multi_process_service: false
+[2026-11-20 12:27:00.936] [336235] [HailoRT] [info] [device.cpp:51] [Device] OS Version: Linux 6.18.50+rpt-rpi-2712 #1 SMP PREEMPT Debian 1:6.18.50-1+rpt1 (2026-09-11) aarch64
+[2026-11-20 12:27:00.936] [336235] [HailoRT] [info] [control.cpp:113] [control__parse_identify_results] firmware_version is: 4.23.0
+[2026-11-20 12:27:00.936] [336235] [HailoRT] [info] [vdevice.cpp:682] [create] VDevice Infos: 0001:03:00.0
+[2026-11-20 12:27:00.959] [336235] [HailoRT] [info] [internal_buffer_manager.cpp:77] [print_execution_results] Planned internal buffer memory: CMA=0 CMA-Desc=262144 Pinned=1128448. memory to edge layer usage factor is 1
+[2026-11-20 12:27:00.959] [336235] [HailoRT] [info] [internal_buffer_manager.cpp:86] [print_execution_results] Default Internal buffer planner executed successfully
+[2026-11-20 12:27:00.993] [336235] [HailoRT] [info] [device_internal.cpp:57] [configure] Configuring HEF took 56.133457 milliseconds
+[2026-11-20 12:27:00.993] [336235] [HailoRT] [info] [vdevice.cpp:780] [configure] Configuring HEF on VDevice took 56.94197 milliseconds
+[2026-11-20 12:27:00.995] [336235] [HailoRT] [info] [core_op.cpp:156] [activate] Activating best took 1.578749 milliseconds. Note that the function is asynchronous and thus the network is not fully activated yet.
+[2026-11-20 12:27:00.995] [336235] [HailoRT] [info] [core_op.cpp:156] [activate] Activating best took 1.599471 milliseconds. Note that the function is asynchronous and thus the network is not fully activated yet.
+[2026-11-20 12:27:01.013] [336235] [HailoRT] [info] [edge_elements.cpp:52] [create] Created (HwWriteEl6best/input_layer1 | hw_frame_size: 1228800)
+[2026-11-20 12:27:01.014] [336235] [HailoRT] [info] [vstream.cpp:754] [InputVStreamImpl] Creating best/input_layer1...
+[2026-11-20 12:27:01.014] [336235] [HailoRT] [info] [vstream_builder.cpp:102] [create_inputs] Input pipeline 'best/input_layer1': (HwWriteEl6best/input_layer1 | hw_frame_size: 1228800) >> HW
+[2026-11-20 12:27:01.014] [336235] [HailoRT] [info] [edge_elements.cpp:287] [create] Created (HwReadEl6best/conv44 | hw_frame_size: 409600)
+[2026-11-20 12:27:01.015] [336235] [HailoRT] [info] [queue_elements.cpp:657] [create] Created (PullQEl_hw_read6best/conv44)
+[2026-11-20 12:27:01.015] [336235] [HailoRT] [info] [filter_elements.cpp:372] [create] Created (PostInferEl6best/conv44 | Quantization - src_type: UINT8, dst_type FLOAT32, limvals_min: -8.94435, limvals_max: 20.6765)
+[2026-11-20 12:27:01.016] [336235] [HailoRT] [info] [queue_elements.cpp:800] [create] Created (UserBuffQEl6best/conv44 | timeout: 10s)
+[2026-11-20 12:27:01.016] [336235] [HailoRT] [info] [vstream.cpp:1114] [OutputVStreamImpl] Creating best/conv44...
+[2026-11-20 12:27:01.016] [336235] [HailoRT] [info] [vstream_builder.cpp:220] [create_outputs] Output pipeline 'best/conv44': HW >> (HwReadEl6best/conv44 | hw_frame_size: 409600) >> (PullQEl_hw_read6best/conv44) >> (PostInferEl6best/conv44 | Quantization - src_type: UINT8, dst_type FLOAT32, limvals_min: -8.94435, limvals_max: 20.6765) >> (UserBuffQEl6best/conv44 | timeout: 10s)
+[2026-11-20 12:27:01.016] [336235] [HailoRT] [info] [edge_elements.cpp:287] [create] Created (HwReadEl14best/conv45 | hw_frame_size: 102400)
+[2026-11-20 12:27:01.016] [336235] [HailoRT] [info] [queue_elements.cpp:657] [create] Created (PullQEl_hw_read14best/conv45)
+[2026-11-20 12:27:01.016] [336235] [HailoRT] [info] [filter_elements.cpp:372] [create] Created (PostInferEl14best/conv45 | Quantization - src_type: UINT8, dst_type FLOAT32, limvals_min: 0, limvals_max: 1 | Reorder - src_order: FCR, src_shape: (80, 80, 16), dst_order: FCR, dst_shape: (80, 80, 9))
+[2026-11-20 12:27:01.016] [336235] [HailoRT] [info] [queue_elements.cpp:800] [create] Created (UserBuffQEl14best/conv45 | timeout: 10s)
+[2026-11-20 12:27:01.016] [336235] [HailoRT] [info] [vstream.cpp:1114] [OutputVStreamImpl] Creating best/conv45...
+[2026-11-20 12:27:01.016] [336235] [HailoRT] [info] [vstream_builder.cpp:220] [create_outputs] Output pipeline 'best/conv45': HW >> (HwReadEl14best/conv45 | hw_frame_size: 102400) >> (PullQEl_hw_read14best/conv45) >> (PostInferEl14best/conv45 | Quantization - src_type: UINT8, dst_type FLOAT32, limvals_min: 0, limvals_max: 1 | Reorder - src_order: FCR, src_shape: (80, 80, 16), dst_order: FCR, dst_shape: (80, 80, 9)) >> (UserBuffQEl14best/conv45 | timeout: 10s)
+[2026-11-20 12:27:01.016] [336235] [HailoRT] [info] [edge_elements.cpp:287] [create] Created (HwReadEl7best/conv46 | hw_frame_size: 204800)
+[2026-11-20 12:27:01.016] [336235] [HailoRT] [info] [queue_elements.cpp:657] [create] Created (PullQEl_hw_read7best/conv46)
+[2026-11-20 12:27:01.016] [336235] [HailoRT] [info] [filter_elements.cpp:372] [create] Created (PostInferEl7best/conv46 | Quantization - src_type: UINT8, dst_type FLOAT32, limvals_min: -4.56252, limvals_max: 2.709)
+[2026-11-20 12:27:01.016] [336235] [HailoRT] [info] [queue_elements.cpp:800] [create] Created (UserBuffQEl7best/conv46 | timeout: 10s)
+[2026-11-20 12:27:01.016] [336235] [HailoRT] [info] [vstream.cpp:1114] [OutputVStreamImpl] Creating best/conv46...
+[2026-11-20 12:27:01.016] [336235] [HailoRT] [info] [vstream_builder.cpp:220] [create_outputs] Output pipeline 'best/conv46': HW >> (HwReadEl7best/conv46 | hw_frame_size: 204800) >> (PullQEl_hw_read7best/conv46) >> (PostInferEl7best/conv46 | Quantization - src_type: UINT8, dst_type FLOAT32, limvals_min: -4.56252, limvals_max: 2.709) >> (UserBuffQEl7best/conv46 | timeout: 10s)
+[2026-11-20 12:27:01.017] [336235] [HailoRT] [info] [edge_elements.cpp:287] [create] Created (HwReadEl0best/conv48 | hw_frame_size: 819200)
+[2026-11-20 12:27:01.036] [336235] [HailoRT] [info] [queue_elements.cpp:657] [create] Created (PullQEl_hw_read0best/conv48)
+[2026-11-20 12:27:01.036] [336235] [HailoRT] [info] [filter_elements.cpp:372] [create] Created (PostInferEl0best/conv48 | Quantization - src_type: UINT8, dst_type FLOAT32, limvals_min: -0.307452, limvals_max: 9.49259)
+[2026-11-20 12:27:01.038] [336235] [HailoRT] [info] [queue_elements.cpp:800] [create] Created (UserBuffQEl0best/conv48 | timeout: 10s)
+[2026-11-20 12:27:01.038] [336235] [HailoRT] [info] [vstream.cpp:1114] [OutputVStreamImpl] Creating best/conv48...
+[2026-11-20 12:27:01.038] [336235] [HailoRT] [info] [vstream_builder.cpp:220] [create_outputs] Output pipeline 'best/conv48': HW >> (HwReadEl0best/conv48 | hw_frame_size: 819200) >> (PullQEl_hw_read0best/conv48) >> (PostInferEl0best/conv48 | Quantization - src_type: UINT8, dst_type FLOAT32, limvals_min: -0.307452, limvals_max: 9.49259) >> (UserBuffQEl0best/conv48 | timeout: 10s)
+[2026-11-20 12:27:01.039] [336235] [HailoRT] [info] [edge_elements.cpp:287] [create] Created (HwReadEl1best/conv60 | hw_frame_size: 102400)
+[2026-11-20 12:27:01.039] [336235] [HailoRT] [info] [queue_elements.cpp:657] [create] Created (PullQEl_hw_read1best/conv60)
+[2026-11-20 12:27:01.039] [336235] [HailoRT] [info] [filter_elements.cpp:372] [create] Created (PostInferEl1best/conv60 | Quantization - src_type: UINT8, dst_type FLOAT32, limvals_min: -8.05068, limvals_max: 15.0159)
+[2026-11-20 12:27:01.039] [336235] [HailoRT] [info] [queue_elements.cpp:800] [create] Created (UserBuffQEl1best/conv60 | timeout: 10s)
+[2026-11-20 12:27:01.039] [336235] [HailoRT] [info] [vstream.cpp:1114] [OutputVStreamImpl] Creating best/conv60...
+[2026-11-20 12:27:01.039] [336235] [HailoRT] [info] [vstream_builder.cpp:220] [create_outputs] Output pipeline 'best/conv60': HW >> (HwReadEl1best/conv60 | hw_frame_size: 102400) >> (PullQEl_hw_read1best/conv60) >> (PostInferEl1best/conv60 | Quantization - src_type: UINT8, dst_type FLOAT32, limvals_min: -8.05068, limvals_max: 15.0159) >> (UserBuffQEl1best/conv60 | timeout: 10s)
+[2026-11-20 12:27:01.039] [336235] [HailoRT] [info] [edge_elements.cpp:287] [create] Created (HwReadEl15best/conv61 | hw_frame_size: 14400)
+[2026-11-20 12:27:01.039] [336235] [HailoRT] [info] [queue_elements.cpp:657] [create] Created (PullQEl_hw_read15best/conv61)
+[2026-11-20 12:27:01.039] [336235] [HailoRT] [info] [filter_elements.cpp:372] [create] Created (PostInferEl15best/conv61 | Quantization - src_type: UINT8, dst_type FLOAT32, limvals_min: 0, limvals_max: 1 | Reorder - src_order: NHCW, src_shape: (40, 40, 9), dst_order: NHWC, dst_shape: (40, 40, 9))
+[2026-11-20 12:27:01.039] [336235] [HailoRT] [info] [queue_elements.cpp:800] [create] Created (UserBuffQEl15best/conv61 | timeout: 10s)
+[2026-11-20 12:27:01.039] [336235] [HailoRT] [info] [vstream.cpp:1114] [OutputVStreamImpl] Creating best/conv61...
+[2026-11-20 12:27:01.039] [336235] [HailoRT] [info] [vstream_builder.cpp:220] [create_outputs] Output pipeline 'best/conv61': HW >> (HwReadEl15best/conv61 | hw_frame_size: 14400) >> (PullQEl_hw_read15best/conv61) >> (PostInferEl15best/conv61 | Quantization - src_type: UINT8, dst_type FLOAT32, limvals_min: 0, limvals_max: 1 | Reorder - src_order: NHCW, src_shape: (40, 40, 9), dst_order: NHWC, dst_shape: (40, 40, 9)) >> (UserBuffQEl15best/conv61 | timeout: 10s)
+[2026-11-20 12:27:01.039] [336235] [HailoRT] [info] [edge_elements.cpp:287] [create] Created (HwReadEl4best/conv62 | hw_frame_size: 51200)
+[2026-11-20 12:27:01.039] [336235] [HailoRT] [info] [queue_elements.cpp:657] [create] Created (PullQEl_hw_read4best/conv62)
+[2026-11-20 12:27:01.039] [336235] [HailoRT] [info] [filter_elements.cpp:372] [create] Created (PostInferEl4best/conv62 | Quantization - src_type: UINT8, dst_type FLOAT32, limvals_min: -3.97926, limvals_max: 2.65284)
+[2026-11-20 12:27:01.039] [336235] [HailoRT] [info] [queue_elements.cpp:800] [create] Created (UserBuffQEl4best/conv62 | timeout: 10s)
+[2026-11-20 12:27:01.039] [336235] [HailoRT] [info] [vstream.cpp:1114] [OutputVStreamImpl] Creating best/conv62...
+[2026-11-20 12:27:01.039] [336235] [HailoRT] [info] [vstream_builder.cpp:220] [create_outputs] Output pipeline 'best/conv62': HW >> (HwReadEl4best/conv62 | hw_frame_size: 51200) >> (PullQEl_hw_read4best/conv62) >> (PostInferEl4best/conv62 | Quantization - src_type: UINT8, dst_type FLOAT32, limvals_min: -3.97926, limvals_max: 2.65284) >> (UserBuffQEl4best/conv62 | timeout: 10s)
+[2026-11-20 12:27:01.039] [336235] [HailoRT] [info] [edge_elements.cpp:287] [create] Created (HwReadEl5best/conv73 | hw_frame_size: 25600)
+[2026-11-20 12:27:01.044] [336235] [HailoRT] [info] [queue_elements.cpp:657] [create] Created (PullQEl_hw_read5best/conv73)
+[2026-11-20 12:27:01.044] [336235] [HailoRT] [info] [filter_elements.cpp:372] [create] Created (PostInferEl5best/conv73 | Quantization - src_type: UINT8, dst_type FLOAT32, limvals_min: -5.25729, limvals_max: 16.7199)
+[2026-11-20 12:27:01.044] [336235] [HailoRT] [info] [queue_elements.cpp:800] [create] Created (UserBuffQEl5best/conv73 | timeout: 10s)
+[2026-11-20 12:27:01.044] [336235] [HailoRT] [info] [vstream.cpp:1114] [OutputVStreamImpl] Creating best/conv73...
+[2026-11-20 12:27:01.044] [336235] [HailoRT] [info] [vstream_builder.cpp:220] [create_outputs] Output pipeline 'best/conv73': HW >> (HwReadEl5best/conv73 | hw_frame_size: 25600) >> (PullQEl_hw_read5best/conv73) >> (PostInferEl5best/conv73 | Quantization - src_type: UINT8, dst_type FLOAT32, limvals_min: -5.25729, limvals_max: 16.7199) >> (UserBuffQEl5best/conv73 | timeout: 10s)
+[2026-11-20 12:27:01.044] [336235] [HailoRT] [info] [edge_elements.cpp:287] [create] Created (HwReadEl8best/conv74 | hw_frame_size: 3600)
+[2026-11-20 12:27:01.045] [336235] [HailoRT] [info] [queue_elements.cpp:657] [create] Created (PullQEl_hw_read8best/conv74)
+[2026-11-20 12:27:01.045] [336235] [HailoRT] [info] [filter_elements.cpp:372] [create] Created (PostInferEl8best/conv74 | Quantization - src_type: UINT8, dst_type FLOAT32, limvals_min: 0, limvals_max: 1 | Reorder - src_order: NHCW, src_shape: (20, 20, 9), dst_order: NHWC, dst_shape: (20, 20, 9))
+[2026-11-20 12:27:01.045] [336235] [HailoRT] [info] [queue_elements.cpp:800] [create] Created (UserBuffQEl8best/conv74 | timeout: 10s)
+[2026-11-20 12:27:01.045] [336235] [HailoRT] [info] [vstream.cpp:1114] [OutputVStreamImpl] Creating best/conv74...
+[2026-11-20 12:27:01.045] [336235] [HailoRT] [info] [vstream_builder.cpp:220] [create_outputs] Output pipeline 'best/conv74': HW >> (HwReadEl8best/conv74 | hw_frame_size: 3600) >> (PullQEl_hw_read8best/conv74) >> (PostInferEl8best/conv74 | Quantization - src_type: UINT8, dst_type FLOAT32, limvals_min: 0, limvals_max: 1 | Reorder - src_order: NHCW, src_shape: (20, 20, 9), dst_order: NHWC, dst_shape: (20, 20, 9)) >> (UserBuffQEl8best/conv74 | timeout: 10s)
+[2026-11-20 12:27:01.045] [336235] [HailoRT] [info] [edge_elements.cpp:287] [create] Created (HwReadEl11best/conv75 | hw_frame_size: 12800)
+[2026-11-20 12:27:01.045] [336235] [HailoRT] [info] [queue_elements.cpp:657] [create] Created (PullQEl_hw_read11best/conv75)
+[2026-11-20 12:27:01.045] [336235] [HailoRT] [info] [filter_elements.cpp:372] [create] Created (PostInferEl11best/conv75 | Quantization - src_type: UINT8, dst_type FLOAT32, limvals_min: -4.55813, limvals_max: 1.86354 | Reorder - src_order: NHCW, src_shape: (20, 20, 32), dst_order: NHWC, dst_shape: (20, 20, 32))
+[2026-11-20 12:27:01.045] [336235] [HailoRT] [info] [queue_elements.cpp:800] [create] Created (UserBuffQEl11best/conv75 | timeout: 10s)
+[2026-11-20 12:27:01.045] [336235] [HailoRT] [info] [vstream.cpp:1114] [OutputVStreamImpl] Creating best/conv75...
+[2026-11-20 12:27:01.045] [336235] [HailoRT] [info] [vstream_builder.cpp:220] [create_outputs] Output pipeline 'best/conv75': HW >> (HwReadEl11best/conv75 | hw_frame_size: 12800) >> (PullQEl_hw_read11best/conv75) >> (PostInferEl11best/conv75 | Quantization - src_type: UINT8, dst_type FLOAT32, limvals_min: -4.55813, limvals_max: 1.86354 | Reorder - src_order: NHCW, src_shape: (20, 20, 32), dst_order: NHWC, dst_shape: (20, 20, 32)) >> (UserBuffQEl11best/conv75 | timeout: 10s)

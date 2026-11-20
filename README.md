@@ -12,10 +12,24 @@ Web recorder and vision tools for Raspberry Pi 5 workshop kits (USB global-shutt
 
 ## Quick install
 
+Shipped kits should use a dedicated Linux user (`pecan`), not a shared campus account. See [docs/KIT-PROVISIONING.md](docs/KIT-PROVISIONING.md).
+
 ```bash
-git clone https://github.com/salirezav/pecan_vision_kit.git
-cd pecan_vision_kit
-chmod +x scripts/setup-kit.sh
+# On a new kit image (as root once):
+sudo ./scripts/ensure-kit-user.sh
+
+# As the kit user — non-interactive bootstrap (clone/deps/service/Desktop icons):
+git clone https://github.com/salirezav/pecan_vision_kit.git ~/pecan-vision-kit
+cd ~/pecan-vision-kit
+chmod +x scripts/*.sh
+./scripts/bootstrap-kit.sh
+```
+
+Or double-click **Start Pecan Vision** on the Desktop after `ensure-kit-user.sh` seeded the launcher.
+
+For AP / NVMe format / kiosk options, run the interactive installer:
+
+```bash
 ./scripts/setup-kit.sh
 ```
 
@@ -39,9 +53,9 @@ Kits install newer versions from the public [GitHub Releases](https://github.com
 
 The Pi needs a path to the internet, usually Ethernet. The config Wi-Fi access point alone cannot reach GitHub. Stop any recording before you update. Recordings, `/mnt/recordings/config.yaml`, and model files under `weights/` stay on the kit.
 
-### From the dashboard
+### From the dashboard or Desktop
 
-When a newer release exists, every page shows a banner with **Update**. That runs `scripts/apply-update.sh`, which downloads the release tarball, checks `SHA256SUMS`, installs the files, refreshes Python dependencies, and restarts `pecan-vision`. If the health check fails, it puts the previous app files back.
+When a newer release exists, every page shows a banner with **Update**. The Desktop **Update Pecan Vision** launcher does the same thing. Both run `scripts/apply-update.sh`, which downloads the release tarball, checks `SHA256SUMS`, installs the files, refreshes Python dependencies, and restarts `pecan-vision`. If the health check fails, it puts the previous app files back.
 
 The banner stays on “Update requested from the dashboard” until the site comes back. It does not list each step. To watch the installer on the Pi:
 
@@ -88,6 +102,7 @@ journalctl -u pecan-vision -n 80 --no-pager
 |-----|---------|
 | [docs/USER-GUIDE.md](docs/USER-GUIDE.md) | Simple guide for plant attendees |
 | [docs/ADMIN.md](docs/ADMIN.md) | Service control, VNC, updates, troubleshooting |
+| [docs/KIT-PROVISIONING.md](docs/KIT-PROVISIONING.md) | Kit user `pecan`, passwords, Desktop bootstrap |
 | [docs/NETWORK.md](docs/NETWORK.md) | Wi‑Fi AP + plant Ethernet design |
 | [docs/STEPS.md](docs/STEPS.md) | Chronological kit build log |
 
