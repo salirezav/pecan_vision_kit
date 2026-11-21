@@ -39,11 +39,13 @@ Then open `http://127.0.0.1:8080` on the Pi, or `http://<pi-ip>:8080` on the LAN
 
 The interactive setup script can:
 
-1. Install OS packages and the Python virtualenv
-2. Prepare the NVMe recordings drive
+1. Install OS packages (including `hailo-all` for HEF / Hailo-8), Python venv with system site-packages
+2. Prepare recordings storage (spare NVMe or directory on the OS disk)
 3. Install the `pecan-vision` systemd service
 4. Configure an always-on Wi‑Fi config access point
 5. Enable Chromium kiosk autostart
+
+After installing Hailo packages on a fresh board, reboot once if `/dev/hailo0` is missing so the PCIe driver loads.
 
 ## Model weights
 

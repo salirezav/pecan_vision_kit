@@ -174,8 +174,14 @@ install_packages() {
     python3-venv python3-pip python3-opencv python3-yaml \
     v4l-utils ffmpeg \
     network-manager \
-    curl ca-certificates
+    curl ca-certificates \
+    hailo-all
   ok "Packages installed"
+  if [[ ! -e /dev/hailo0 ]]; then
+    warn "Hailo packages installed but /dev/hailo0 is missing — reboot once so the PCIe driver loads (needed for .hef models)."
+  else
+    ok "Hailo device present: /dev/hailo0"
+  fi
 }
 
 ensure_uv() {
