@@ -46,6 +46,10 @@ RESOLUTIONS = [
 
 FPS_CHOICES = [10, 30, 60, 80, 120, 150, 200]
 
+_OPEN_RETRY_S = 2.0
+_READ_FAIL_RELEASE = 40
+_NO_CAMERA_MSG = "No camera attached — plug in the USB camera"
+
 
 def find_camera_device(preferred: str, fallback: str) -> str:
     if preferred and os.path.exists(preferred):
@@ -73,6 +77,7 @@ class CameraService:
     save_dir: str = "/mnt/recordings/videos"
     fourcc_name: str = "MJPG"
     record_extension: str = ".avi"
+    device_fallback: str = "/dev/video0"
 
     _cap: cv2.VideoCapture | None = field(default=None, init=False, repr=False)
     _writer: cv2.VideoWriter | None = field(default=None, init=False, repr=False)
@@ -97,12 +102,13 @@ class CameraService:
     _frames_written: int = field(default=0, init=False, repr=False)
     _last_error: str | None = field(default=None, init=False, repr=False)
     _opened_device: str | None = field(default=None, init=False, repr=False)
+    _read_failures: int = field(default=0, init=False, repr=False)
 
     def start(self) -> None:
         with self._lock:
             if self._running:
                 return
-            self._open_locked()
+            self._try_open_locked()
             self._running = True
             self._thread = threading.Thread(target=self._loop, name="cam-loop", daemon=True)
             self._writer_thread = threading.Thread(
@@ -160,18 +166,35 @@ class CameraService:
             if self._cap is not None:
                 self._cap.release()
                 self._cap = None
-            self._open_locked()
+            self._opened_device = None
+            opened = self._try_open_locked()
         self._flush_and_release_writer(writer)
-        if was_recording:
+        if was_recording and opened:
             self.start_recording()
 
-    def _open_locked(self) -> None:
+    def _resolve_device_locked(self) -> str | None:
+        try:
+            return find_camera_device(self.device, self.device_fallback)
+        except FileNotFoundError:
+            return None
+
+    def _try_open_locked(self) -> bool:
+        """Open the camera if present. On failure leave _cap unset and set last_error."""
         Path(self.save_dir).mkdir(parents=True, exist_ok=True)
-        device = self.device
+        device = self._resolve_device_locked()
+        if device is None:
+            self._cap = None
+            self._opened_device = None
+            self._last_error = _NO_CAMERA_MSG
+            return False
+        self.device = device
         cap = cv2.VideoCapture(device, cv2.CAP_V4L2)
         if not cap.isOpened():
             cap.release()
-            raise RuntimeError(f"Could not open camera device: {device}")
+            self._cap = None
+            self._opened_device = None
+            self._last_error = f"Could not open camera device: {device}"
+            return False
         fourcc = cv2.VideoWriter_fourcc(*self.fourcc_name)
         cap.set(cv2.CAP_PROP_FOURCC, fourcc)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
@@ -182,6 +205,15 @@ class CameraService:
         self._cap = cap
         self._opened_device = device
         self._last_error = None
+        self._read_failures = 0
+        return True
+
+    def _release_cap_locked(self) -> None:
+        if self._cap is not None:
+            self._cap.release()
+            self._cap = None
+        self._opened_device = None
+        self._read_failures = 0
 
     def _loop(self) -> None:
         while True:
@@ -189,17 +221,26 @@ class CameraService:
                 if not self._running:
                     break
                 cap = self._cap
+                if cap is None:
+                    self._try_open_locked()
+                    cap = self._cap
             if cap is None:
-                time.sleep(0.05)
+                time.sleep(_OPEN_RETRY_S)
                 continue
             ok, frame = cap.read()
             if not ok or frame is None:
-                self._last_error = "Camera read failed — check USB cable / power"
+                with self._lock:
+                    self._read_failures += 1
+                    self._last_error = "Camera read failed — check USB cable / power"
+                    if self._read_failures >= _READ_FAIL_RELEASE:
+                        self._release_cap_locked()
+                        self._last_error = _NO_CAMERA_MSG
                 time.sleep(0.05)
                 continue
 
             now = time.perf_counter()
             with self._lock:
+                self._read_failures = 0
                 self._frame = frame
                 recording = self._recording and self._writer is not None
                 writer = self._writer
@@ -329,6 +370,8 @@ class CameraService:
         with self._lock:
             if self._recording:
                 return self._current_file or ""
+            if self._cap is None:
+                raise RuntimeError(self._last_error or _NO_CAMERA_MSG)
             Path(self.save_dir).mkdir(parents=True, exist_ok=True)
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             path = str(Path(self.save_dir) / f"rec_{stamp}_{self.width}x{self.height}_{self.fps}fps{self.record_extension}")

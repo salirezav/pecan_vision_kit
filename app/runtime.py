@@ -236,11 +236,14 @@ def apply_preset(c: CameraService, preset: dict[str, Any]) -> None:
 def init_camera() -> CameraService:
     global cam, settings
     settings = load_settings()
-    device = find_camera_device(
-        settings.get("camera_device", ""),
-        settings.get("camera_device_fallback", "/dev/video0"),
-    )
-    settings["camera_device"] = device
+    preferred = str(settings.get("camera_device", "") or "")
+    fallback = str(settings.get("camera_device_fallback", "/dev/video0") or "/dev/video0")
+    try:
+        device = find_camera_device(preferred, fallback)
+        settings["camera_device"] = device
+    except FileNotFoundError:
+        # Keep the saved preferred path; do not overwrite config with a placeholder.
+        device = preferred or fallback
     service = CameraService(
         device=device,
         width=int(settings.get("width", 1280)),
@@ -249,6 +252,7 @@ def init_camera() -> CameraService:
         save_dir=settings.get("save_dir", "/mnt/recordings/videos"),
         fourcc_name=settings.get("fourcc", "MJPG"),
         record_extension=settings.get("record_extension", ".avi"),
+        device_fallback=fallback,
     )
     service.start()
     cam = service
