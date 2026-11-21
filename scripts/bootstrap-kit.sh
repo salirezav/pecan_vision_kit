@@ -62,6 +62,21 @@ ensure_repo() {
   ok "Cloned into $KIT_ROOT"
 }
 
+ensure_kit_ownership() {
+  # Common failure: repo was cloned/copied as root or engr-ugaif, then pecan cannot create .venv.
+  local owner
+  owner="$(stat -c '%U' "$KIT_ROOT" 2>/dev/null || true)"
+  if [[ -n "$owner" && "$owner" != "$USER_NAME" ]]; then
+    warn "$KIT_ROOT is owned by $owner — fixing ownership for $USER_NAME"
+    sudo chown -R "$USER_NAME:$USER_NAME" "$KIT_ROOT"
+  fi
+  if [[ ! -w "$KIT_ROOT" ]]; then
+    err "$KIT_ROOT is not writable by $USER_NAME"
+    err "Fix with:  sudo chown -R $USER_NAME:$USER_NAME $KIT_ROOT"
+    exit 1
+  fi
+}
+
 ensure_packages() {
   info "Ensuring OS packages…"
   sudo apt-get update
@@ -69,8 +84,14 @@ ensure_packages() {
     python3-venv python3-pip python3-opencv python3-yaml \
     v4l-utils ffmpeg \
     network-manager \
-    curl ca-certificates git
+    curl ca-certificates git \
+    hailo-all
   ok "Packages ready"
+  if [[ ! -e /dev/hailo0 ]]; then
+    warn "Hailo packages installed but /dev/hailo0 is missing — reboot once so the PCIe driver loads (needed for .hef models)."
+  else
+    ok "Hailo device present: /dev/hailo0"
+  fi
 }
 
 ensure_uv() {
@@ -242,6 +263,7 @@ Path: $KIT_ROOT
 EOF
   need_sudo
   ensure_repo
+  ensure_kit_ownership
   chmod +x "$KIT_ROOT/scripts/"*.sh 2>/dev/null || true
   ensure_packages
   ensure_venv
