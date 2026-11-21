@@ -1,4 +1,6 @@
 # Default recorder settings (copied to /mnt/recordings/config.yaml on first run)
+# Fallback when the hostname is not usda-vision-##. Startup replaces this
+# with that number and writes it back to the runtime config.
 kit_id: "01"
 save_dir: /mnt/recordings/videos
 camera_device: /dev/v4l/by-id/usb-Global_Shutter_Camera_Global_Shutter_Camera_2605160001-video-index0

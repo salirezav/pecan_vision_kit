@@ -13,6 +13,7 @@ import yaml
 
 from camera import FPS_CHOICES, RESOLUTIONS, CameraService, find_camera_device
 from deploy_live import DeployLiveService
+from kit_id import apply_hostname_kit_id, stored_kit_id
 from review_video import ReviewVideoService
 from segment import ModelBusy, ModelService
 from segment_inspect import display_frame_max_side
@@ -104,11 +105,30 @@ def load_defaults() -> dict[str, Any]:
     return yaml.safe_load(DEFAULTS_PATH.read_text()) or {}
 
 
+def _persist_kit_id(kit_id: str) -> None:
+    overlay: dict[str, Any] = {}
+    try:
+        if RUNTIME_CONFIG.exists():
+            loaded = yaml.safe_load(RUNTIME_CONFIG.read_text()) or {}
+            if isinstance(loaded, dict):
+                overlay = loaded
+        if stored_kit_id(overlay.get("kit_id")) == kit_id:
+            return
+        overlay["kit_id"] = kit_id
+        save_settings(overlay)
+    except OSError:
+        return
+
+
 def load_settings() -> dict[str, Any]:
     data = load_defaults()
     if RUNTIME_CONFIG.exists():
         overlay = yaml.safe_load(RUNTIME_CONFIG.read_text()) or {}
-        data.update(overlay)
+        if isinstance(overlay, dict):
+            data.update(overlay)
+    detected = apply_hostname_kit_id(data)
+    if detected:
+        _persist_kit_id(detected)
     return data
 
 

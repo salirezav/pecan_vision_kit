@@ -298,9 +298,23 @@ prepare_nvme() {
   ok "Dedicated recordings mount ready: $MOUNT_POINT"
 }
 
+kit_id_from_hostname() {
+  local host number
+  host="$(hostname -s 2>/dev/null || hostname || true)"
+  host="${host%%.*}"
+  if [[ "$host" =~ ^[Uu][Ss][Dd][Aa]-[Vv][Ii][Ss][Ii][Oo][Nn]-([0-9]{1,2})$ ]]; then
+    number="$((10#${BASH_REMATCH[1]}))"
+    printf '%02d' "$number"
+    return 0
+  fi
+  return 1
+}
+
 write_kit_config() {
-  local kit_id
-  kit_id="$(ask "Kit ID (two digits, e.g. 01)" "01")"
+  local kit_id suggested
+  suggested="$(kit_id_from_hostname || true)"
+  suggested="${suggested:-01}"
+  kit_id="$(ask "Kit ID (two digits, e.g. 01)" "$suggested")"
   mkdir -p "$MOUNT_POINT"
   if [[ -f "$MOUNT_POINT/config.yaml" ]]; then
     warn "Runtime config already exists: $MOUNT_POINT/config.yaml"

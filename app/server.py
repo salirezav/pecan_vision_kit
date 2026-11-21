@@ -26,7 +26,9 @@ app.register_blueprint(system_bp)
 
 @app.context_processor
 def inject_version():
-    return rt.version_context()
+    ctx = rt.version_context()
+    ctx["kit_id"] = rt.settings.get("kit_id", "??")
+    return ctx
 
 
 def main() -> None:
