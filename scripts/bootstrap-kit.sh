@@ -8,7 +8,9 @@ fi
 set -euo pipefail
 
 REPO_URL="${PECAN_REPO_URL:-https://github.com/salirezav/pecan_vision_kit.git}"
-USER_NAME="${SUDO_USER:-$USER}"
+# Use the account that is actually running this script. `sudo -u pecan` leaves
+# SUDO_USER set to the caller (for example engr-ugaif), which is not the kit user.
+USER_NAME="$(id -un)"
 HOME_DIR="$(getent passwd "$USER_NAME" | cut -d: -f6)"
 KIT_ROOT="${PECAN_KIT_ROOT:-$HOME_DIR/pecan-vision-kit}"
 SERVICE_SRC="$KIT_ROOT/systemd/pecan-vision.service"

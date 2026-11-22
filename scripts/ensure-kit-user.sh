@@ -79,6 +79,24 @@ set_password() {
 
 set_password
 
+configure_passwordless_sudo() {
+  local sudoers_tmp sudoers_dst
+  sudoers_dst="/etc/sudoers.d/${KIT_USER}-nopasswd"
+  sudoers_tmp="$(mktemp)"
+  printf '%s\n' "${KIT_USER} ALL=(ALL) NOPASSWD:ALL" > "$sudoers_tmp"
+  if ! visudo -cf "$sudoers_tmp"; then
+    rm -f "$sudoers_tmp"
+    err "Refusing to install passwordless sudo rule that visudo rejected"
+    exit 1
+  fi
+  cp "$sudoers_tmp" "$sudoers_dst"
+  chmod 440 "$sudoers_dst"
+  rm -f "$sudoers_tmp"
+  ok "Passwordless sudo installed: $sudoers_dst"
+}
+
+configure_passwordless_sudo
+
 configure_autologin() {
   [[ "$AUTOLOGIN" == "1" || "$AUTOLOGIN" == "yes" || "$AUTOLOGIN" == "y" ]] || return 0
   if [[ -f /etc/lightdm/lightdm.conf ]]; then

@@ -18,6 +18,7 @@ SHA256SUMS
 site/_site/
 find-pi-ssh.ps1
 scripts/prep-ethernet-and-vnc.sh
+scripts/provision-pecan-kit.sh
 setup-pi-lan-share.ps1
 setup-pi-hotspot.ps1
 setup-pi-hotspot.sh

@@ -11,7 +11,9 @@ fi
 set -euo pipefail
 
 KIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-USER_NAME="${SUDO_USER:-$USER}"
+# Use the account that is actually running this script. `sudo -u pecan` leaves
+# SUDO_USER set to the caller (for example engr-ugaif), which is not the kit user.
+USER_NAME="$(id -un)"
 HOME_DIR="$(getent passwd "$USER_NAME" | cut -d: -f6)"
 SERVICE_SRC="$KIT_ROOT/systemd/pecan-vision.service"
 SUDOERS_SRC="$KIT_ROOT/config/sudoers-pecan-vision"
