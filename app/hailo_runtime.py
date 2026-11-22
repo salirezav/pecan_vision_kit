@@ -9,12 +9,12 @@ import cv2
 import numpy as np
 
 from segment_draw import (
-    _COLORS,
     center_inside_roi,
     dominant_keep,
     draw_detection_label,
     mark_thickness,
 )
+from segment_inspect import class_color_bgr
 
 
 class HailoModel:
@@ -455,7 +455,7 @@ def run_hailo(
     if draw:
         thickness = mark_thickness(annotated)
         for class_id, x1, y1, x2, y2, _score in boxes:
-            color = _COLORS[class_id % len(_COLORS)]
+            color = class_color_bgr(class_id)
             cv2.rectangle(annotated, (x1, y1), (x2, y2), color, thickness, cv2.LINE_AA)
             name = labels[class_id] if 0 <= class_id < len(labels) else f"Class {class_id + 1}"
             draw_detection_label(

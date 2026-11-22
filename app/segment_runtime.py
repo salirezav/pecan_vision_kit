@@ -33,8 +33,8 @@ from segment_draw import (
 )
 from segment_inspect import (
     SPEED_SIZES,
-    _COLORS,
     _TASKS,
+    class_color_bgr,
     infer_frame_max_side,
     inspect_checkpoint,
     parse_class_names,
@@ -368,7 +368,7 @@ def _run_model(
             instance["area"] = float(mask_by_index[index].sum())
         instances.append(instance)
         if draw:
-            color = _COLORS[class_id % len(_COLORS)]
+            color = class_color_bgr(class_id)
             thickness = mark_thickness(annotated)
             drew_outline = False
             if index in mask_by_index:

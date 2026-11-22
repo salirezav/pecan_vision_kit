@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import colorsys
 import io
 import os
 import pickle
@@ -28,16 +29,8 @@ _SEG_SPECS: tuple[tuple[str, int, int, int], ...] = (
     ("RFDETRSeg2XLarge", 768, 6, 300),
 )
 
-_COLORS = (
-    (80, 170, 70),
-    (60, 140, 220),
-    (40, 180, 200),
-    (220, 150, 50),
-    (200, 80, 160),
-    (220, 80, 80),
-    (160, 120, 220),
-    (180, 180, 70),
-)
+# Golden-angle step so neighboring class indexes land far apart on the hue wheel.
+_COLOR_HUE_STEP = 0.618033988749895
 
 # Ultralytics class name -> task the kit can run.
 _CLASS_TASKS = {
@@ -620,10 +613,25 @@ def parse_class_names(raw: str, num_classes: int, family: str = "rfdetr") -> lis
     return names
 
 
+def class_color_bgr(class_id: int) -> tuple[int, int, int]:
+    """Stable BGR color for one class index.
+
+    Each index keeps its own hue. The page swatches are built from this same
+    value, so an outline and its legend chip always match.
+    """
+    hue = (int(class_id) * _COLOR_HUE_STEP) % 1.0
+    red, green, blue = colorsys.hsv_to_rgb(hue, 0.65, 0.92)
+    return (
+        int(round(blue * 255)),
+        int(round(green * 255)),
+        int(round(red * 255)),
+    )
+
+
 def class_colors(count: int) -> list[str]:
     colors: list[str] = []
-    for index in range(count):
-        blue, green, red = _COLORS[index % len(_COLORS)]
+    for index in range(max(0, int(count))):
+        blue, green, red = class_color_bgr(index)
         colors.append(f"#{red:02x}{green:02x}{blue:02x}")
     return colors
 

@@ -7,7 +7,7 @@ from typing import Any
 import cv2
 import numpy as np
 
-from segment_inspect import _COLORS
+from segment_inspect import class_color_bgr
 
 def overlay_scale(frame: np.ndarray, reference_side: int | None = None) -> float:
     """How much to grow strokes and type so they match a native-sized frame.
@@ -402,7 +402,7 @@ def _classify_result(
         return bgr.copy(), []
     best = items[0]
     class_id = order[0]
-    color = _COLORS[class_id % len(_COLORS)]
+    color = class_color_bgr(class_id)
     annotated = bgr.copy()
     scale = overlay_scale(annotated, reference_side)
     bar_h = max(1, int(round(42 * scale)))
@@ -439,7 +439,7 @@ def _draw_semantic(
         pixels = int(region.sum())
         if pixels <= 0:
             continue
-        overlay[region] = _COLORS[class_id % len(_COLORS)]
+        overlay[region] = class_color_bgr(class_id)
         name = labels[class_id] if class_id < len(labels) else f"Class {class_id + 1}"
         areas.append({"class": name, "share": round(pixels / total, 4)})
         class_areas[name] = pixels
@@ -512,7 +512,7 @@ def _draw_ultralytics_instances(
             cutoff = float(class_thresholds[name])
         if confidence < cutoff:
             continue
-        color = _COLORS[class_id % len(_COLORS)]
+        color = class_color_bgr(class_id)
         polygon = None
         if polygons is not None and index < len(polygons):
             pts = np.asarray(polygons[index], dtype=np.int32)
@@ -658,10 +658,8 @@ def _label_anchor(boxes: np.ndarray | None, corners: np.ndarray | None, index: i
     return 8, 24
 
 
-# UGA Olympic (BGR) and white for half-yield inspection overlays.
-_OLYMPIC_BGR = (96, 78, 0)
+# White ROI outline. Class overlays use class_color_bgr.
 _WHITE_BGR = (255, 255, 255)
-_BLACK_BGR = (0, 0, 0)
 
 
 def draw_roi_rectangle(
@@ -687,35 +685,20 @@ def draw_inspection_polygons(
     polygons: list[tuple[np.ndarray, int]],
     names: dict[int, str],
 ) -> None:
-    """White outline + Olympic contour with a label plate (half-yield style)."""
+    """Class-colored outline and label chip, same as the other models."""
+    thickness = mark_thickness(frame)
     for polygon, class_id in polygons:
-        points = np.round(polygon).astype(np.int32).reshape(-1, 1, 2)
-        if len(points) < 3:
+        points = np.round(polygon).astype(np.int32)
+        if points.ndim != 2 or len(points) < 3:
             continue
-        cv2.polylines(frame, [points], True, _WHITE_BGR, 4, cv2.LINE_AA)
-        cv2.polylines(frame, [points], True, _OLYMPIC_BGR, 2, cv2.LINE_AA)
-        moments = cv2.moments(points)
-        if moments["m00"] == 0:
-            continue
+        color = class_color_bgr(int(class_id))
+        cv2.polylines(
+            frame, [points.reshape(-1, 1, 2)], True, color, thickness, cv2.LINE_AA
+        )
         label = str(names.get(int(class_id), class_id))
-        if len(label) > 28:
-            label = label[:27] + "…"
-        (text_w, text_h), baseline = cv2.getTextSize(
-            label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1
+        label_at = (
+            int(round((float(points[:, 0].min()) + float(points[:, 0].max())) / 2.0)),
+            int(round(float(points[:, 1].min()))),
         )
-        width = text_w + 12
-        height = text_h + baseline + 10
-        x = min(max(0, int(moments["m10"] / moments["m00"])), max(0, frame.shape[1] - width))
-        y = min(max(height, int(moments["m01"] / moments["m00"]) - 10), frame.shape[0] - 1)
-        cv2.rectangle(frame, (x, y - height), (x + width, y), _WHITE_BGR, -1)
-        cv2.putText(
-            frame,
-            label,
-            (x + 6, y - 6),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
-            _BLACK_BGR,
-            1,
-            cv2.LINE_AA,
-        )
+        draw_detection_label(frame, label, label_at, color)
 
