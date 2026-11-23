@@ -1,5 +1,7 @@
 # Pecan Vision Kit — quick user guide
 
+To connect a laptop and open the dashboard, follow [Open the dashboard](open-the-dashboard.md). The steps below are what to do after the dashboard is on screen.
+
 ## Record a video (easiest path)
 
 1. Power on the kit and wait ~1 minute.

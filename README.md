@@ -14,7 +14,7 @@ Web recorder and vision tools for Raspberry Pi 5 workshop kits (USB global-shutt
 
 ## Quick install
 
-Shipped kits should use a dedicated Linux user (`pecan`), not a shared campus account. See [docs/KIT-PROVISIONING.md](docs/KIT-PROVISIONING.md).
+On a kit, the sign-in is `pecan`. The password is the name on the label followed immediately by `1234` (kit `usda-vision-08` uses `usda-vision-081234`). To open the dashboard from a laptop, see [Open the dashboard](docs/open-the-dashboard.md).
 
 ```bash
 # On a new kit image (as root once):
@@ -104,13 +104,9 @@ journalctl -u pecan-vision -n 80 --no-pager
 
 | Doc | Purpose |
 |-----|---------|
+| [Open the dashboard](docs/open-the-dashboard.md) | Connect a laptop and open the kit in a browser |
 | [Quick start](docs/USER-GUIDE.md) | Record, watch, and change camera settings |
-| [Ethernet from Windows](docs/how%20to%20connect%20to%20pi%20via%20ethernet%20on%20windows.md) | Laptop plugged straight into the Pi |
-| [Enable VNC](docs/how%20to%20enable%20vnc.md) | Turn on WayVNC and connect a viewer |
 | [Admin](docs/ADMIN.md) | Service control, updates, troubleshooting |
-| [Provisioning](docs/KIT-PROVISIONING.md) | Kit user `pecan`, passwords, Desktop bootstrap |
-| [Network](docs/NETWORK.md) | Wi‑Fi AP + plant Ethernet design |
-| [Build log](docs/STEPS.md) | Chronological kit build log |
 
 ## License
 

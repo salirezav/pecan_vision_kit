@@ -13,10 +13,10 @@ WayVNC is part of Raspberry Pi OS and is already enabled on the first kit.
 
 1. Connect to the Pi (config AP or plant Ethernet).
 2. Use RealVNC Viewer / TigerVNC / similar → Pi IP (`10.42.0.1` on the AP).
-3. Log in as the kit user (`pecan` on shipped kits — never a shared campus account).
+3. Log in as `pecan`. The password is the kit’s name on the label followed immediately by `1234`. Kit `usda-vision-08` uses `usda-vision-081234`.
 4. Open a terminal or browser as needed.
 
-Provisioning, passwords, and Desktop launchers: see [KIT-PROVISIONING.md](KIT-PROVISIONING.md).
+Opening the dashboard from a laptop is covered in [Open the dashboard](open-the-dashboard.md).
 
 Useful terminal commands:
 
