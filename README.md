@@ -2,7 +2,7 @@
 
 Web recorder and vision tools for Raspberry Pi 5 workshop kits (USB global-shutter camera + NVMe storage).
 
-**Docs site:** [salirezav.github.io/pecan_vision_kit](https://salirezav.github.io/pecan_vision_kit/) (this README, published via GitHub Pages).
+**Docs site:** [salirezav.github.io/pecan_vision_kit](https://salirezav.github.io/pecan_vision_kit/) (this README, the quick starts, and the kit guides, published via GitHub Pages).
 
 **The `0.x` line is a preview.** It is not a finished, bullet-proof release. Expect rough edges, missing polish, and breaking changes until `1.0.0`.
 
@@ -104,11 +104,13 @@ journalctl -u pecan-vision -n 80 --no-pager
 
 | Doc | Purpose |
 |-----|---------|
-| [docs/USER-GUIDE.md](docs/USER-GUIDE.md) | Simple guide for plant attendees |
-| [docs/ADMIN.md](docs/ADMIN.md) | Service control, VNC, updates, troubleshooting |
-| [docs/KIT-PROVISIONING.md](docs/KIT-PROVISIONING.md) | Kit user `pecan`, passwords, Desktop bootstrap |
-| [docs/NETWORK.md](docs/NETWORK.md) | Wi‑Fi AP + plant Ethernet design |
-| [docs/STEPS.md](docs/STEPS.md) | Chronological kit build log |
+| [Quick start](docs/USER-GUIDE.md) | Record, watch, and change camera settings |
+| [Ethernet from Windows](docs/how%20to%20connect%20to%20pi%20via%20ethernet%20on%20windows.md) | Laptop plugged straight into the Pi |
+| [Enable VNC](docs/how%20to%20enable%20vnc.md) | Turn on WayVNC and connect a viewer |
+| [Admin](docs/ADMIN.md) | Service control, updates, troubleshooting |
+| [Provisioning](docs/KIT-PROVISIONING.md) | Kit user `pecan`, passwords, Desktop bootstrap |
+| [Network](docs/NETWORK.md) | Wi‑Fi AP + plant Ethernet design |
+| [Build log](docs/STEPS.md) | Chronological kit build log |
 
 ## License
 
