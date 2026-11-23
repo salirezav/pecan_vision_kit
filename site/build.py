@@ -19,10 +19,7 @@ DOCS = ROOT / "docs"
 REPO_BLOB = "https://github.com/salirezav/pecan_vision_kit/blob/main/"
 REPO_TREE = "https://github.com/salirezav/pecan_vision_kit/tree/main/"
 REPO_HOME = "https://github.com/salirezav/pecan_vision_kit"
-
-# Custom domain vision.alirezavaezi.com is intentionally not written yet.
-# Add a CNAME file here only after DNS points vision at salirezav.github.io,
-# or the next deploy will send visitors to a name that does not resolve.
+CUSTOM_DOMAIN = "vision.alirezavaezi.com"
 
 
 @dataclass(frozen=True)
@@ -158,6 +155,7 @@ def main() -> None:
     (OUT / "assets").mkdir(parents=True)
     shutil.copy2(SITE / "assets" / "style.css", OUT / "assets" / "style.css")
     (OUT / ".nojekyll").write_text("", encoding="utf-8")
+    (OUT / "CNAME").write_text(CUSTOM_DOMAIN + "\n", encoding="utf-8")
 
     for page in PAGES:
         raw = page.source.read_text(encoding="utf-8")
