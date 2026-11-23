@@ -411,9 +411,10 @@ EOF
     return
   fi
 
-  local kit_id ssid pass
-  kit_id="${KIT_ID_CHOSEN:-$(cat "$KIT_ROOT/config/kit_id.txt" 2>/dev/null || echo 01)}"
-  ssid="$(ask "AP Wi‑Fi name (SSID)" "PecanCam-$kit_id")"
+  local ssid pass host
+  host="$(hostname -s 2>/dev/null || hostname || true)"
+  host="${host%%.*}"
+  ssid="$(ask "AP Wi‑Fi name (SSID)" "$host")"
   while true; do
     pass="$(ask "AP Wi‑Fi password (8+ characters)" "")"
     if [[ ${#pass} -ge 8 ]]; then
