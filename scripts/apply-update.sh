@@ -227,7 +227,8 @@ log "Kit user $USER_NAME home $HOME_DIR"
 chown -R "$USER_NAME:$USER_NAME" "$KIT_ROOT"
 UV="$HOME_DIR/.local/bin/uv"
 if ! command -v uv >/dev/null 2>&1 && [[ ! -x "$UV" ]]; then
-  curl -LsSf https://astral.sh/uv/install.sh | sudo -u "$USER_NAME" env UV_INSTALL_DIR="$HOME_DIR/.local/bin" sh
+  # 0.13.x extracts wheels as empty files on this Pi and uv sync then fails.
+  curl -LsSf https://astral.sh/uv/0.9.17/install.sh | sudo -u "$USER_NAME" env UV_INSTALL_DIR="$HOME_DIR/.local/bin" sh
 fi
 if command -v uv >/dev/null 2>&1; then
   UV="$(command -v uv)"

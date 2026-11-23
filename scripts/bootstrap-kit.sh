@@ -106,7 +106,8 @@ ensure_uv() {
     return
   fi
   info "Installing uv…"
-  curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$HOME_DIR/.local/bin" sh
+  # 0.13.x extracts wheels as empty files on this Pi and uv sync then fails.
+  curl -LsSf https://astral.sh/uv/0.9.17/install.sh | env UV_INSTALL_DIR="$HOME_DIR/.local/bin" sh
   export PATH="$HOME_DIR/.local/bin:$PATH"
 }
 
