@@ -2,15 +2,15 @@
 
 To connect a laptop and open the dashboard, follow [Open the dashboard](open-the-dashboard.md). The steps below are what to do after the dashboard is on screen.
 
-## Record a video (easiest path)
+## Record a video
 
-1. Power on the kit and wait ~1 minute.
-2. On your phone, open Wi‑Fi and join **`PecanCam-XX`** (name and password are on the sticker on the case).
-3. Open the phone browser and go to: **`http://10.42.0.1:8080`**
-4. You should see the live camera picture.
-5. Press **Start recording**. The red **RECORDING** badge appears.
-6. Press **Stop recording** when done.
-7. Videos are stored on the kit’s internal drive (not on your phone).
+Start with the dashboard already open in the laptop browser. [Open the dashboard](open-the-dashboard.md) is how you get there, on Windows or on a Mac. The address is the Raspberry Pi’s address: `http://usda-vision-08.local:8080` over the Ethernet cable, or `http://` plus the Pi’s Wi-Fi numbers plus `:8080` after the Pi has joined that Wi-Fi. Use the number from your own label. The camera is a USB camera. It does not have an address.
+
+1. You should see the live camera picture.
+2. Press **Start recording**. A red **RECORDING** badge appears.
+3. Leave the page open while the kit is recording.
+4. Press **Stop recording** when you are done.
+5. The video is stored on the kit, not on the laptop. Open **Videos** to watch it.
 
 ## If a monitor is plugged into the Pi
 
@@ -33,7 +33,3 @@ After you press **Stop recording**, the kit converts the capture to **H.264 MP4*
 Open **Settings**. The live camera preview stays on the left so you can see what each change does. Prefer **1280×720** and **60–120 fps** for fast product on the line.
 
 Use **Browse** next to Save folder to pick a location. The kit runs a **storage speed check** against your current resolution/FPS — if the drive is too slow, follow the on-screen hints (lower FPS/resolution or use kit NVMe storage).
-
-## Plant Ethernet (optional)
-
-If IT gives you a network cable, plug it into the Pi’s Ethernet port. The config Wi‑Fi (`PecanCam-XX`) stays available.

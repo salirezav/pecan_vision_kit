@@ -9,7 +9,7 @@ The examples below use kit **08**. Your label has its own number. If the label s
 - The Raspberry Pi kit
 - The USB-C power adapter that belongs with the kit
 - An Ethernet cable (the network cable with a wide plastic clip on each end)
-- A laptop
+- A laptop, either Windows or Mac
 
 If the laptop has no Ethernet socket, use a USB Ethernet adapter: plug the adapter into the laptop, then plug the cable into the adapter.
 
@@ -55,13 +55,15 @@ A small light next to the Pi’s Ethernet socket usually turns on or blinks when
 
 ## 3. Open the dashboard
 
-1. On the laptop, open Chrome, Edge, or Firefox.
+1. On the laptop, open a web browser. Safari, Chrome, Edge, and Firefox all work.
 2. Click the address bar. That is the long box at the top of the window, where a website address normally appears.
 3. Type this address, with your kit’s number in place of `08`, and press Enter:
 
    `http://usda-vision-08.local:8080`
 
-You should see the dashboard, including the live camera picture.
+You should see the dashboard, including a live picture from the camera.
+
+The camera is a USB camera plugged into the Raspberry Pi. It does not have an address, and it does not join Wi-Fi. Every address on this page belongs to the Raspberry Pi. The picture is the USB camera, shown by the Pi.
 
 Type the address yourself. Do not search for it. Each part has a job:
 
@@ -81,15 +83,23 @@ Try these in order.
 1. Wait one more minute, then press Enter on the address again.
 2. Check the cable. Both ends are clicked in. The laptop is awake and not asleep.
 3. Check the address character by character: `http://`, the label name, `.local`, and `:8080`. There are no spaces. There is no `www`. Use `http://`, not `https://`.
-4. On Windows, open the Start menu, type `cmd`, and press Enter. In the black window, type the following with your kit’s number, then press Enter:
+4. Ask the laptop whether it can see the Pi. Use the steps for the computer you have.
 
-   ```text
-   ping usda-vision-08.local
-   ```
+**On Windows**
 
-   Lines that say `Reply from` mean the laptop can see the kit. Go back to the browser and open the dashboard address again.
+1. Open the Start menu, type `cmd`, and press Enter.
+2. In the black window, type `ping usda-vision-08.local` and press Enter. Use your kit’s number.
+3. Lines that say `Reply from` mean the laptop can see the Pi. Go back to the browser and open the dashboard address again.
+4. `Ping request could not find host` means the laptop cannot find that name yet. Wait one minute and run the same command again. Compare the name with the label.
 
-   `Ping request could not find host` means the laptop cannot find that name yet. Wait one minute and run the same `ping` command again. Compare the name with the label.
+**On a Mac**
+
+1. Press the **Command** key and the **Space** bar together. A search box opens.
+2. Type `Terminal` and press Return.
+3. In the window that opens, type `ping usda-vision-08.local` and press Return. Use your kit’s number.
+4. Lines that say `64 bytes from` mean the Mac can see the Pi. This command keeps running. Press the **Control** key and **C** together to stop it.
+5. Go back to the browser and open the dashboard address again.
+6. `Unknown host` or `cannot resolve` means the Mac cannot find that name yet. Wait one minute and run the same command again. Compare the name with the label.
 
 The name address works while the Ethernet cable connects the laptop and the Pi. Use the next section when that address stops opening the dashboard, or when you want an address that keeps working on Wi-Fi without the cable.
 
@@ -99,24 +109,33 @@ Use this when `http://usda-vision-08.local:8080` no longer opens. You will look 
 
 Keep the Ethernet cable connected until the Wi-Fi address opens the dashboard. The VNC connection in this section uses the cable.
 
-### Install a VNC app
+### Open the Pi’s desktop
 
-VNC is an app that shows another computer’s screen. RealVNC Viewer works. Any other VNC app works with the same address, username, and password.
+VNC is a way to show the Pi’s screen on the laptop. The Pi is powered on, the Ethernet cable is still connected, and you have waited until the Pi has finished starting.
 
-Download **RealVNC Viewer** (the free viewer) from [realvnc.com](https://www.realvnc.com/en/connect/download/viewer/) and install it with the default choices. If a VNC app is already installed, use that.
+**On Windows**
 
-### Connect to the kit’s desktop
-
-1. The Pi is powered on, the Ethernet cable is still connected, and you have waited until the Pi has finished starting.
+1. Download **RealVNC Viewer** (the free viewer) from [realvnc.com](https://www.realvnc.com/en/connect/download/viewer/) and install it with the default choices. If a VNC app is already installed, use that.
 2. Open the VNC app.
-3. In the server or address box, type:
-
-   `usda-vision-08.local:5900`
-
+3. In the server or address box, type `usda-vision-08.local:5900`. Use your kit’s number.
    If the app has a separate port box, type `usda-vision-08.local` as the address and `5900` as the port.
 4. Click **Connect**.
-5. A warning about an unknown certificate, an untrusted connection, or a hostname mismatch is expected. The Pi created its own certificate. Choose **Continue**, **Yes**, or **Accept** so the connection goes through.
-6. Sign in with the kit sign-in from above:
+
+**On a Mac**
+
+The Mac already includes this. You do not need to install an app.
+
+1. Click the desktop so you are in Finder, not inside another app.
+2. In the menu bar at the top of the screen, click **Go**, then **Connect to Server**. You can also press the **Command** key and **K** together.
+3. In the server address box, type `vnc://usda-vision-08.local:5900`. Use your kit’s number.
+4. Click **Connect**.
+
+If that menu is missing, download **RealVNC Viewer** for Mac from [realvnc.com](https://www.realvnc.com/en/connect/download/viewer/) and connect to `usda-vision-08.local:5900` the same way as on Windows.
+
+**After the connection opens, on either computer**
+
+1. A warning about an unknown certificate, an untrusted connection, or a hostname mismatch is expected. The Pi created its own certificate. Choose **Continue**, **Yes**, or **Accept**.
+2. Sign in with the kit sign-in from above:
 
    | | |
    |---|---|
@@ -147,26 +166,15 @@ Still inside the VNC window:
 
 1. Open a terminal on the Pi. Click the terminal icon in the Pi’s top bar (a black rectangle). If you do not see it, click the Raspberry menu at the **top left** of the Pi’s screen, then **Accessories**, then **Terminal**.
 2. Click inside the terminal so the cursor is there.
-3. Type this and press Enter. There is a space between `ip` and `a`:
-
-   ```text
-   ip a
-   ```
-
-4. The reply is several blocks of text. Find the block whose first line contains `wlan0`. That block is the Wi-Fi connection.
-5. Inside the `wlan0` block, find the line that starts with `inet` and a number like this:
-
-   ```text
-   inet 192.168.137.64/24
-   ```
-
-6. The address is the four numbers **before** the slash. In this example the address is `192.168.137.64`. Your numbers will be different. Write them down.
+3. Type `ip a` and press Enter. There is a space between `ip` and `a`.
+4. The reply is several blocks. Find the block whose first line contains `wlan0`. That block is the Pi’s Wi-Fi connection.
+5. Inside the `wlan0` block, find the line that starts with `inet` and a number like `inet 192.168.137.64/24`.
+6. The address is the four numbers **before** the slash. In this example the address is `192.168.137.64`. Your numbers will be different. Write them down. This address belongs to the Raspberry Pi. The USB camera does not have one.
 
 Skip these lines. They are not the address to put in the browser:
 
 - `inet 127.0.0.1` is the Pi itself
 - a line under `eth0` is the Ethernet cable, not the Wi-Fi
-- `inet 10.42.0.1` is the kit’s own camera Wi-Fi, not the network the laptop is using
 
 ### Open the dashboard with that address
 
