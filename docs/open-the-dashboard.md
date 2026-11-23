@@ -53,7 +53,64 @@ A small light next to the Pi’s Ethernet socket usually turns on or blinks when
 3. A red light on the Pi comes on. A green light may blink while the Pi starts.
 4. Wait **two minutes** before you open the browser. The Pi is still starting during that time. Leave the power and the Ethernet cable connected while you wait.
 
-## 3. Open the dashboard
+## 3. Give the Pi an address and internet
+
+Do this while the Ethernet cable is connected. The laptop stays on its usual Wi-Fi. That Wi-Fi is where the laptop’s internet comes from. Sharing sends that internet down the cable to the Pi.
+
+Two things happen when sharing is on:
+
+- The laptop gives the Raspberry Pi an address on the cable automatically. You do not type an address into the Pi.
+- The Pi can reach the internet through the laptop.
+
+The camera is not part of this. It is a USB camera and does not get an address.
+
+If the Pi was already powered on before you turn sharing on, unplug the Ethernet cable from the laptop and plug it back in. The Pi then asks the laptop for an address.
+
+**On Windows**
+
+This switch is called Internet Connection Sharing.
+
+1. The laptop is joined to Wi-Fi, and that Wi-Fi has internet. Open a web page you have used before, to be sure.
+2. Press the **Windows** key and **R** together. A small Run box opens.
+3. Type `ncpa.cpl` and press Enter. A window named Network Connections opens. If Windows asks for permission, click **Yes**.
+4. Find the icon named **Wi-Fi**. Right-click it, click **Properties**, then click the **Sharing** tab.
+5. Check **Allow other network users to connect through this computer’s Internet connection**.
+6. If you see **Home networking connection**, choose the cable, not Wi-Fi. It is usually named **Ethernet**. With a USB Ethernet adapter it may be named **Ethernet 2** or include the adapter’s brand. To tell which one: unplug the cable, look for the icon that says it is disconnected, plug the cable back in, and choose that name.
+7. Click **OK**. If Windows asks you to confirm, click **Yes**.
+
+Windows then sets the laptop’s end of the cable to `192.168.137.1` and gives the Pi a different address that starts with `192.168.137.`
+
+Check the laptop. Open the Start menu, type `cmd`, and press Enter. In the black window, type `ipconfig` and press Enter. Under the Ethernet adapter you chose, **IPv4 Address** should be `192.168.137.1`. That number is the laptop, not the Pi. If that line still starts with `169.254.`, sharing is not on. Repeat the Sharing steps, then unplug the cable and plug it back in.
+
+The Pi’s own address is the other `192.168.137.` number. To see it, type `ping -4 usda-vision-08.local` and press Enter. Use your kit’s number. A line that says `Reply from 192.168.137.40` means the Pi’s address is `192.168.137.40`. Your last number will be different. `192.168.137.1` is always the laptop, so do not use `.1` as the Pi.
+
+**On a Mac**
+
+This switch is called Internet Sharing.
+
+1. The Mac is joined to Wi-Fi, and that Wi-Fi has internet. Open a web page you have used before, to be sure.
+2. Click the Apple menu at the top left of the screen, then **System Settings**.
+3. Click **General** in the sidebar, then **Sharing**. You may need to scroll the sidebar.
+4. Find **Internet Sharing**. If its switch is already on, turn it off. The choices cannot be edited while it is on.
+5. Click **Configure**, or the round **i** button, next to Internet Sharing.
+6. Set **Share your connection from** to **Wi-Fi**.
+7. Under **To devices using**, turn on the cable. It is named **Ethernet**, or **USB**, or the brand of a USB Ethernet adapter. Leave **Wi-Fi** off in this list. Wi-Fi is the source, not the port you are sharing to.
+8. Click **Done**.
+9. Turn **Internet Sharing** on. If the Mac warns that sharing may affect other people on the network, click **Start** or **OK**. Sharing Wi-Fi out through the cable to this one Pi is what you want. The Mac’s Wi-Fi stays connected.
+
+The Mac then uses `192.168.2.1` on its end of the cable and gives the Pi a different address that starts with `192.168.2.`
+
+Check the Mac. Press **Command** and **Space**, type `Terminal`, and press Return. Type `ping usda-vision-08.local` and press Return. Use your kit’s number. A line that says `64 bytes from 192.168.2.2` means the Pi’s address is `192.168.2.2`. Your last number will be different. `192.168.2.1` is the Mac, not the Pi. The command keeps running. Press **Control** and **C** together to stop it.
+
+If the only address you see is full of colons, wait half a minute, unplug the cable, plug it back in, and run the same command again.
+
+**Confirm the Pi has internet**
+
+You can do this after the Pi’s desktop is open, in the section that opens that desktop. On the Pi’s own screen, open Terminal and type `ping -c 3 google.com`, then press Enter. Lines that say a time in milliseconds mean the Pi reached the internet through the laptop. `Network is unreachable` or `unknown host` means sharing is not on yet, or the cable was not plugged back in after you turned sharing on.
+
+You can keep using the name address, `http://usda-vision-08.local:8080`. The number the laptop gave the Pi also opens the dashboard, for example `http://192.168.137.40:8080` on Windows or `http://192.168.2.2:8080` on a Mac. Add `:8080` either way.
+
+## 4. Open the dashboard
 
 1. On the laptop, open a web browser. Safari, Chrome, Edge, and Firefox all work.
 2. Click the address bar. That is the long box at the top of the window, where a website address normally appears.
@@ -103,7 +160,7 @@ Try these in order.
 
 The name address works while the Ethernet cable connects the laptop and the Pi. Use the next section when that address stops opening the dashboard, or when you want an address that keeps working on Wi-Fi without the cable.
 
-## 4. A lasting address, using VNC and Wi-Fi
+## 5. A lasting address, using VNC and Wi-Fi
 
 Use this when `http://usda-vision-08.local:8080` no longer opens. You will look at the Pi’s own desktop from the laptop, join the Pi to the same Wi-Fi as the laptop, read the Pi’s Wi-Fi address, and use that address from then on.
 
@@ -201,6 +258,7 @@ A router can give the Pi a new number later. If the saved number stops opening t
 | When | Address | Example for kit 08 |
 |---|---|---|
 | First connection, cable plugged in | label name, `.local`, port `8080` | `http://usda-vision-08.local:8080` |
+| Laptop is sharing internet over the cable | the number the laptop gave the Pi, port `8080` | Windows: `http://192.168.137.40:8080`. Mac: `http://192.168.2.2:8080` |
 | Opening the Pi’s desktop | label name, `.local`, port `5900` | `usda-vision-08.local:5900` |
 | After the Pi is on your Wi-Fi | the four `wlan0` numbers, port `8080` | `http://192.168.137.64:8080` |
 

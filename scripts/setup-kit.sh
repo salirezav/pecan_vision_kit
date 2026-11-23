@@ -23,6 +23,9 @@ MOUNT_POINT="/mnt/recordings"
 NVME_DEV="/dev/nvme0n1"
 # Set by prepare_nvme: dedicated (spare NVMe mount) | rootfs (dir on OS disk) | none
 STORAGE_MODE=""
+# Set when configure_ap actually activates the hotspot. The Pi desktop often
+# turns the Wi-Fi radio off a moment after that, once the old client link drops.
+AP_ACTIVATED=0
 
 RED=$'\033[31m'; GREEN=$'\033[32m'; YEL=$'\033[33m'; CYA=$'\033[36m'; BLD=$'\033[1m'; RST=$'\033[0m'
 
@@ -393,6 +396,28 @@ eth0_has_carrier() {
   [[ "$carrier" == "1" ]]
 }
 
+# Raspberry Pi's Wi-Fi switch often ends up off after an AP replaces the
+# previous client connection. nmcli still reports the profile as activated.
+wifi_radio_enabled() {
+  local radio
+  radio="$(nmcli -t -f WIFI radio 2>/dev/null | head -1 || true)"
+  [[ "$radio" == "enabled" ]]
+}
+
+ensure_ap_stays_on() {
+  local con="$1" state
+  if wifi_radio_enabled; then
+    state="$(nmcli -t -f DEVICE,STATE device status 2>/dev/null | awk -F: '$1=="wlan0"{print $2; exit}')"
+    if [[ "$state" == "connected" ]]; then
+      return 0
+    fi
+  fi
+  warn "Wi-Fi was off after Access Point setup — turning it back on."
+  sudo rfkill unblock wifi 2>/dev/null || true
+  sudo nmcli radio wifi on || true
+  sudo nmcli connection up "$con" || warn "Could not bring AP up — check rfkill / wifi"
+}
+
 configure_ap() {
   cat <<EOF
 
@@ -442,6 +467,9 @@ EOF
 
   # Default n: activating drops Wi‑Fi client; do this when Ethernet is ready.
   if ask_yn "Activate Access Point now? (drops current Wi‑Fi client link)" "n"; then
+    AP_ACTIVATED=1
+    sudo rfkill unblock wifi 2>/dev/null || true
+    sudo nmcli radio wifi on || true
     sudo nmcli connection up "$con" || warn "Could not bring AP up — check rfkill / wifi"
   else
     warn "AP connection saved but not activated. Run: sudo nmcli connection up PecanCam-AP"
@@ -570,6 +598,13 @@ main_menu() {
     9) say "Bye."; exit 0 ;;
     *) err "Unknown selection"; exit 1 ;;
   esac
+
+  # The desktop Wi-Fi switch flips off during the prompts after AP activation.
+  # Turn it back on once those prompts are done, before this script exits.
+  if [[ "$AP_ACTIVATED" == 1 ]]; then
+    sleep 2
+    ensure_ap_stays_on "PecanCam-AP"
+  fi
 
   cat <<EOF
 
