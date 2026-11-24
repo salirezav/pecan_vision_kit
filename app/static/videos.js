@@ -93,6 +93,13 @@
     still.removeAttribute("src");
   }
 
+  const ICON_DOWNLOAD =
+    '<svg class="video-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 3a1 1 0 0 1 1 1v9.59l2.3-2.3a1 1 0 1 1 1.4 1.42l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 1 1 1.4-1.42L11 13.59V4a1 1 0 0 1 1-1Zm-7 14a1 1 0 0 1 1 1v1h12v-1a1 1 0 1 1 2 0v2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1Z"/></svg>';
+  const ICON_RENAME =
+    '<svg class="video-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M4.5 19.5a1 1 0 0 1-1-1.12l.4-3.4 9.9-9.9a2.5 2.5 0 0 1 3.54 0l1.08 1.08a2.5 2.5 0 0 1 0 3.54l-9.9 9.9-3.4.4Zm2.06-2.12 2.06-.24 8.3-8.3a.5.5 0 0 0 0-.7L15.84 7a.5.5 0 0 0-.7 0l-8.3 8.3-.24 2.08Zm11.08-11.78.7.7a1.5 1.5 0 0 1 0 2.12l-.7.7-1.42-1.41.7-.7a.5.5 0 0 1 .72 0Z"/></svg>';
+  const ICON_DELETE =
+    '<svg class="video-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M9 3a1 1 0 0 0-.9.55L7.38 5H5a1 1 0 1 0 0 2h14a1 1 0 1 0 0-2h-2.38l-.72-1.45A1 1 0 0 0 15 3H9Zm1 6a1 1 0 0 1 1 1v7a1 1 0 1 1-2 0v-7a1 1 0 0 1 1-1Zm4 0a1 1 0 0 1 1 1v7a1 1 0 1 1-2 0v-7a1 1 0 0 1 1-1ZM7 8h10l-.7 10.1A2 2 0 0 1 14.3 20H9.7a2 2 0 0 1-1.99-1.9L7 8Z"/></svg>';
+
   function renderList() {
     listEl.innerHTML = "";
     if (!videos.length) {
@@ -112,11 +119,12 @@
       main.type = "button";
       main.className = "video-main";
       main.disabled = converting;
+      main.title = video.name;
       const statusBit = converting
         ? " · Converting to MP4…"
         : ` · ${video.size_mb} MB`;
       main.innerHTML =
-        `<strong>${escapeHtml(video.name)}</strong>` +
+        `<strong class="video-name">${escapeHtml(video.name)}</strong>` +
         `<span>${escapeHtml(video.mtime_text || "")}${statusBit}</span>` +
         (converting
           ? `<span class="converting-note">${escapeHtml(
@@ -131,8 +139,10 @@
       actions.className = "video-actions";
 
       const downloadBtn = document.createElement("a");
-      downloadBtn.className = "btn small";
-      downloadBtn.textContent = "Download";
+      downloadBtn.className = "btn icon-btn";
+      downloadBtn.setAttribute("aria-label", "Download " + video.name);
+      downloadBtn.title = "Download";
+      downloadBtn.innerHTML = ICON_DOWNLOAD;
       if (converting || video.downloadable === false) {
         downloadBtn.classList.add("disabled");
         downloadBtn.href = "#";
@@ -147,15 +157,19 @@
 
       const renameBtn = document.createElement("button");
       renameBtn.type = "button";
-      renameBtn.className = "btn small";
-      renameBtn.textContent = "Rename";
+      renameBtn.className = "btn icon-btn";
+      renameBtn.setAttribute("aria-label", "Rename " + video.name);
+      renameBtn.title = "Rename";
+      renameBtn.innerHTML = ICON_RENAME;
       renameBtn.disabled = converting;
       renameBtn.addEventListener("click", () => renameVideo(video.name));
 
       const delBtn = document.createElement("button");
       delBtn.type = "button";
-      delBtn.className = "btn small danger";
-      delBtn.textContent = "Delete";
+      delBtn.className = "btn icon-btn danger";
+      delBtn.setAttribute("aria-label", "Delete " + video.name);
+      delBtn.title = "Delete";
+      delBtn.innerHTML = ICON_DELETE;
       delBtn.addEventListener("click", () => deleteVideo(video.name));
 
       actions.appendChild(downloadBtn);

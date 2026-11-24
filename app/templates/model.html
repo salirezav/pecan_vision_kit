@@ -5,12 +5,18 @@
   <div class="model-stage">
     <div class="model-views">
       <div class="preview-wrap" id="camera-wrap">
-        <img id="camera-preview" class="preview" src="{{ url_for('camera.video_feed') }}" alt="Live camera preview">
+        <div class="preview-media">
+          <img id="camera-preview" class="preview" src="{{ url_for('camera.video_feed') }}" alt="Live camera preview">
+        </div>
+        <button id="btn-camera-collapse" class="preview-collapse-btn" type="button" aria-expanded="true" aria-controls="camera-preview" title="Minimize live camera">▾</button>
         <div class="preview-caption">Live camera</div>
       </div>
-      <div class="preview-wrap">
-        <img id="result" class="preview" alt="Model result" hidden>
-        <div id="result-empty" class="result-empty">The model result will show up here.</div>
+      <div class="preview-wrap" id="result-wrap">
+        <div class="preview-media">
+          <img id="result" class="preview" alt="Model result" hidden>
+          <div id="mass-marks" class="mass-marks" hidden></div>
+          <div id="result-empty" class="result-empty">The model result will show up here.</div>
+        </div>
         <div id="result-caption" class="preview-caption">Model result</div>
       </div>
     </div>
@@ -42,18 +48,21 @@
         </div>
 
         <form id="upload-form" class="form-grid">
-          <label class="wide">Weights file
-            <input id="weights-file" name="file" type="file" accept=".pt,.pth,.hef,.zip,application/zip,application/x-zip-compressed">
-            <span class="hint">Accepts .pt / .pth, .hef, or a Hailo export .zip (HEF + metadata.yaml).</span>
-          </label>
+          <div class="upload-row">
+            <label class="upload-file-field">Weights file
+              <input id="weights-file" name="file" type="file" accept=".pt,.pth,.hef,.zip,application/zip,application/x-zip-compressed">
+            </label>
+            <button id="btn-upload" class="btn primary" type="submit">Upload model</button>
+          </div>
+          <p class="hint upload-file-hint">Accepts .pt / .pth, .hef, or a Hailo export .zip (HEF + metadata.yaml).</p>
           <label id="names-field" class="wide">Class names, in order
             <input id="class-names" name="class_names" type="text" placeholder="Leave blank to use the names stored in the file" autocomplete="off">
           </label>
           <div class="row-actions">
-            <button id="btn-upload" class="btn primary" type="submit">Upload model</button>
             <button id="btn-names" class="btn" type="button">Save names</button>
           </div>
         </form>
+        <p id="model-msg" class="msg" aria-live="polite"></p>
         </details>
       </section>
 
@@ -100,6 +109,7 @@
       <h2 class="metrics-title">Metrics to extract</h2>
       <button id="btn-reset-run" class="btn" type="button">Reset run</button>
     </div>
+    <p id="metrics-msg" class="msg" aria-live="polite"></p>
     <p id="metrics-note" class="hint"></p>
     <div id="metrics-list" class="metrics-list"></div>
     <form id="metric-form" class="metric-form">
