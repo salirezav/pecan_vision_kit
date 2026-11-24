@@ -75,7 +75,7 @@
 <section class="panel">
   <h2>Network</h2>
   <p>Hostname: <strong>{{ network.hostname }}</strong></p>
-  <p class="hint">Config Wi‑Fi AP (phones): join <code>PecanCam-{{ kit_id }}</code>, then open <code>http://10.42.0.1:8080</code>. Plant network: plug Ethernet into <code>eth0</code>.</p>
+  <p class="hint">From a laptop on the Ethernet cable, open <code>http://{{ network.hostname }}.local:8080</code>. After this kit is on Wi-Fi, use the address shown below.</p>
   <pre class="log">{{ network.ip_addr }}</pre>
   <pre class="log">{{ network.nm_devices }}</pre>
 </section>
@@ -83,8 +83,8 @@
 <section class="panel">
   <h2>VNC</h2>
   <ol class="checklist">
-    <li>Connect to the Pi over Ethernet or the config AP.</li>
-    <li>Use a VNC viewer to the Pi’s IP (AP gateway is usually <code>10.42.0.1</code>).</li>
+    <li>Connect the laptop to the Pi with the Ethernet cable.</li>
+    <li>In a VNC viewer, connect to <code>{{ network.hostname }}.local:5900</code> and sign in as <code>pecan</code>.</li>
     <li>Open Chromium → <code>http://localhost:8080</code> for the same UI.</li>
     <li>Terminal shortcuts:
       <pre class="log">sudo systemctl status pecan-vision

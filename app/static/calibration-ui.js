@@ -52,6 +52,7 @@
     let saving = false;
     let inputsDisabled = false;
     let onChange = typeof options.onChange === "function" ? options.onChange : null;
+    let onMassInput = typeof options.onMassInput === "function" ? options.onMassInput : null;
     let suppressSave = false;
 
     function current() {
@@ -156,7 +157,7 @@
       sync();
     }
 
-    function addMassSlider(id, title, value) {
+    function addMassSlider(id, title, value, bucket) {
       const label = document.createElement("label");
       label.textContent = title;
       const output = document.createElement("output");
@@ -173,6 +174,7 @@
       };
       input.addEventListener("input", () => {
         sync();
+        if (onMassInput) onMassInput(bucket, current());
         scheduleSave();
       });
       label.append(output, input);
@@ -206,8 +208,8 @@
         addConfidenceSlider(name, conf[name] != null ? conf[name] : fallback);
       });
       if (halfyield) {
-        addMassSlider("cal-mass-half", "Half mass / area", record[MASS_HALF] ?? 0.001);
-        addMassSlider("cal-mass-piece", "Piece mass / area", record[MASS_PIECE] ?? 0.001);
+        addMassSlider("cal-mass-half", "Half mass / area", record[MASS_HALF] ?? 0.001, "half");
+        addMassSlider("cal-mass-piece", "Piece mass / area", record[MASS_PIECE] ?? 0.001, "piece");
       }
       applyDisabledState();
       suppressSave = false;

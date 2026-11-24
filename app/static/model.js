@@ -1,6 +1,8 @@
 (() => {
   const statusEl = document.getElementById("model-status");
   const msgEl = document.getElementById("msg");
+  const modelMsgEl = document.getElementById("model-msg");
+  const metricsMsgEl = document.getElementById("metrics-msg");
   const namesEl = document.getElementById("class-names");
   const fileEl = document.getElementById("weights-file");
   const formEl = document.getElementById("upload-form");
@@ -12,9 +14,11 @@
   const speedEl = document.getElementById("speed");
   const speedRow = document.getElementById("speed-row");
   const resultEl = document.getElementById("result");
+  const massMarksEl = document.getElementById("mass-marks");
   const emptyEl = document.getElementById("result-empty");
   const resultCaption = document.getElementById("result-caption");
   const countsEl = document.getElementById("counts");
+  const cameraCollapseBtn = document.getElementById("btn-camera-collapse");
   const cardEl = document.getElementById("model-card");
   const libraryHintEl = document.getElementById("model-library-hint");
   const modelListEl = document.getElementById("model-list");
@@ -49,9 +53,17 @@
         root: document.getElementById("calibration"),
         sliders: document.getElementById("calibration-sliders"),
         hint: document.getElementById("calibration-hint"),
-        onError: (err) => setMsg(err.message || String(err), "err"),
+        onError: (err) => setCheckMsg(err.message || String(err), "err"),
         onChange: (record) => {
           if (model) model.calibration = record;
+          if (isHalfyield() && yieldSamples.length) {
+            recomputeYieldShare();
+            renderMetrics();
+          }
+        },
+        onMassInput: (bucket, record) => {
+          if (model) model.calibration = record;
+          updateMassMarks(bucket, record);
           if (isHalfyield() && yieldSamples.length) {
             recomputeYieldShare();
             renderMetrics();
@@ -104,6 +116,8 @@
   let halfShareRun = null;
   let halfAreaFrame = 0;
   let pieceAreaFrame = 0;
+  let massMarks = [];
+  let massFocus = null;
   let builtinEnabled = {
     pecan_exposed_kernel_mean: true,
     pecan_exposed_kernel_median: true,
@@ -184,9 +198,26 @@
     return (value * 100).toFixed(1) + "%";
   }
 
+  function setPanelMsg(el, text, kind) {
+    if (!el) return;
+    el.textContent = text || "";
+    el.className = "msg" + (kind ? " " + kind : "");
+  }
+
+  function setCheckMsg(text, kind) {
+    setPanelMsg(msgEl, text, kind);
+  }
+
+  function setModelMsg(text, kind) {
+    setPanelMsg(modelMsgEl, text, kind);
+  }
+
+  function setMetricsMsg(text, kind) {
+    setPanelMsg(metricsMsgEl, text, kind);
+  }
+
   function setMsg(text, kind) {
-    msgEl.textContent = text || "";
-    msgEl.className = "msg" + (kind ? " " + kind : "");
+    setCheckMsg(text, kind);
   }
 
   function formatBytes(bytes) {
@@ -693,6 +724,8 @@
     cardEl.hidden = !installed;
     namesField.hidden = installed && model.names_editable === false;
     namesBtn.hidden = namesField.hidden;
+    const namesActions = namesBtn.closest(".row-actions");
+    if (namesActions) namesActions.hidden = namesField.hidden;
     if (speedRow) speedRow.hidden = installed && isHalfyield();
     if (calibration) calibration.render(model, model.calibration);
     if (installed) {
@@ -728,7 +761,7 @@
       statusEl.className = "msg";
     }
     if (model.error) {
-      setMsg(model.error, "err");
+      setModelMsg(model.error, "err");
     }
     renderSelectedSummary();
     syncActionButtons();
@@ -797,7 +830,7 @@
     deleting = true;
     renderModelList();
     syncActionButtons();
-    setMsg("Deleting " + label + "…", "");
+    setModelMsg("Deleting " + label + "…", "");
     try {
       const response = await fetch("/api/model/delete", {
         method: "POST",
@@ -819,10 +852,10 @@
         const follow = model.installed
           ? " Now using " + (model.filename || "the remaining model") + "."
           : "";
-        setMsg("Deleted " + label + "." + (wasActive ? follow : ""), "ok");
+        setModelMsg("Deleted " + label + "." + (wasActive ? follow : ""), "ok");
       }
     } catch (err) {
-      setMsg(err.message || String(err), "err");
+      setModelMsg(err.message || String(err), "err");
       renderModelList();
     } finally {
       deleting = false;
@@ -831,11 +864,84 @@
     }
   }
 
+  function formatGrams(value) {
+    if (!Number.isFinite(value)) return "—";
+    if (value >= 100) return value.toFixed(0) + " g";
+    if (value >= 10) return value.toFixed(1) + " g";
+    if (value >= 1) return value.toFixed(2) + " g";
+    return value.toPrecision(2) + " g";
+  }
+
+  function clearMassMarks() {
+    massMarks = [];
+    massFocus = null;
+    if (!massMarksEl) return;
+    massMarksEl.innerHTML = "";
+    massMarksEl.hidden = true;
+  }
+
+  function massCoefficient(record, bucket) {
+    const key =
+      bucket === "half"
+        ? window.CalibrationUi.MASS_HALF
+        : window.CalibrationUi.MASS_PIECE;
+    const value = record && record[key];
+    return Number(value) || 0.001;
+  }
+
+  function renderMassMarks(focus, record) {
+    if (!massMarksEl) return;
+    if (!massMarks.length || resultEl.hidden) {
+      massMarksEl.innerHTML = "";
+      massMarksEl.hidden = true;
+      return;
+    }
+    const active = focus || massFocus;
+    if (!active) {
+      massMarksEl.innerHTML = "";
+      massMarksEl.hidden = true;
+      return;
+    }
+    const cal = record || (calibration ? calibration.current() : (model && model.calibration)) || {};
+    const coef = massCoefficient(cal, active);
+    const html = massMarks
+      .filter((mark) => mark.class === active)
+      .map((mark) => {
+        const grams = Number(mark.area) * coef;
+        const left = Math.max(0, Math.min(100, Number(mark.nx) * 100));
+        const top = Math.max(0, Math.min(100, Number(mark.ny) * 100));
+        return (
+          '<span class="mass-mark ' +
+          escapeHtml(mark.class) +
+          '" style="left:' +
+          left +
+          "%;top:" +
+          top +
+          '%">' +
+          escapeHtml(formatGrams(grams)) +
+          "</span>"
+        );
+      })
+      .join("");
+    massMarksEl.innerHTML = html;
+    massMarksEl.hidden = !html;
+  }
+
+  function updateMassMarks(bucket, record) {
+    if (!isHalfyield()) {
+      clearMassMarks();
+      return;
+    }
+    massFocus = bucket === "piece" ? "piece" : "half";
+    renderMassMarks(massFocus, record);
+  }
+
   function clearResult() {
     resultEl.hidden = true;
     resultEl.removeAttribute("src");
     emptyEl.hidden = false;
     countsEl.innerHTML = "";
+    clearMassMarks();
     if (model && model.empty_label) emptyEl.textContent = model.empty_label;
   }
 
@@ -849,7 +955,7 @@
     selecting = true;
     renderModelList();
     syncActionButtons();
-    setMsg("Switching model…", "");
+    setModelMsg("Switching model…", "");
     try {
       const response = await fetch("/api/model/select", {
         method: "POST",
@@ -867,9 +973,9 @@
       renderStatus();
       if (!isHalfyield()) await refreshMetrics();
       else renderMetrics();
-      if (!model.error) setMsg("Now using " + (model.filename || "the selected model") + ".", "ok");
+      if (!model.error) setModelMsg("Now using " + (model.filename || "the selected model") + ".", "ok");
     } catch (err) {
-      setMsg(err.message || String(err), "err");
+      setModelMsg(err.message || String(err), "err");
       renderModelList();
     } finally {
       selecting = false;
@@ -907,6 +1013,24 @@
     resultEl.src = data.image;
     resultEl.hidden = false;
     emptyEl.hidden = true;
+    if (Array.isArray(data.mass_marks)) {
+      massMarks = data.mass_marks
+        .filter((mark) => mark && (mark.class === "half" || mark.class === "piece"))
+        .map((mark) => ({
+          class: mark.class,
+          area: Number(mark.area) || 0,
+          nx: Number(mark.nx) || 0,
+          ny: Number(mark.ny) || 0,
+        }));
+    } else {
+      massMarks = [];
+    }
+    if (massFocus) {
+      renderMassMarks(massFocus);
+    } else if (massMarksEl) {
+      massMarksEl.innerHTML = "";
+      massMarksEl.hidden = true;
+    }
     const seconds = (data.elapsed_ms / 1000).toFixed(1);
     if (data.result_mode === "scores") {
       const rows = (data.items || []).map((row) =>
@@ -1044,7 +1168,7 @@
   formEl.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!fileEl.files || !fileEl.files[0]) {
-      setMsg("Choose a .pt, .pth, .hef, or Hailo export .zip weights file first.", "err");
+      setModelMsg("Choose a .pt, .pth, .hef, or Hailo export .zip weights file first.", "err");
       return;
     }
     const uploadName = String(fileEl.files[0].name || "");
@@ -1052,14 +1176,14 @@
       ? uploadName.slice(uploadName.lastIndexOf(".")).toLowerCase()
       : "";
     if (![".pt", ".pth", ".hef", ".zip"].includes(uploadSuffix)) {
-      setMsg("Choose a .pt, .pth, .hef, or Hailo export .zip weights file.", "err");
+      setModelMsg("Choose a .pt, .pth, .hef, or Hailo export .zip weights file.", "err");
       return;
     }
     const body = new FormData();
     body.append("file", fileEl.files[0]);
     if (overrideNames) body.append("class_names", namesEl.value);
     uploadBtn.disabled = true;
-    setMsg("Uploading model…", "");
+    setModelMsg("Uploading model…", "");
     try {
       const response = await fetch("/api/model/upload", { method: "POST", body });
       const data = await response.json();
@@ -1072,10 +1196,10 @@
       resetBuilder();
       clearResult();
       renderStatus();
-      if (!model.error) setMsg("Model saved on this kit.", "ok");
+      if (!model.error) setModelMsg("Model saved on this kit.", "ok");
       await refreshMetrics();
     } catch (err) {
-      setMsg(err.message || String(err), "err");
+      setModelMsg(err.message || String(err), "err");
     } finally {
       uploadBtn.disabled = false;
       renderStatus();
@@ -1101,11 +1225,11 @@
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error || "Could not save names.");
       model = data;
-      setMsg("Class names saved.", "ok");
+      setModelMsg("Class names saved.", "ok");
       resetBuilder();
       renderStatus();
     } catch (err) {
-      setMsg(err.message || String(err), "err");
+      setModelMsg(err.message || String(err), "err");
     } finally {
       namesBtn.disabled = false;
     }
@@ -1191,26 +1315,26 @@
     const name = metricNameEl.value.trim();
     const formula = metricFormulaInput.value.trim();
     if (!name) {
-      setMsg("Give the metric a name.", "err");
+      setMetricsMsg("Give the metric a name.", "err");
       return;
     }
     if (!formula) {
-      setMsg("Enter a formula.", "err");
+      setMetricsMsg("Enter a formula.", "err");
       return;
     }
     try {
       window.MetricFormula.evaluateFormula(formula, {});
     } catch (err) {
-      setMsg(err.message || String(err), "err");
+      setMetricsMsg(err.message || String(err), "err");
       return;
     }
     const unknown = window.MetricFormula.formulaLabels(formula).filter((label) => !classNames().includes(label));
     if (unknown.length) {
-      setMsg("Unknown class: " + unknown.join(", "), "err");
+      setMetricsMsg("Unknown class: " + unknown.join(", "), "err");
       return;
     }
     if (metrics.length >= 8 && !editingId) {
-      setMsg("Keep at most 8 metrics.", "err");
+      setMetricsMsg("Keep at most 8 metrics.", "err");
       return;
     }
     const previous = editingId ? metrics.find((metric) => metric.id === editingId) : null;
@@ -1227,9 +1351,9 @@
     try {
       await persistMetrics(next);
       resetBuilder();
-      setMsg("Metric saved.", "ok");
+      setMetricsMsg("Metric saved.", "ok");
     } catch (err) {
-      setMsg(err.message || String(err), "err");
+      setMetricsMsg(err.message || String(err), "err");
     } finally {
       metricSaveBtn.disabled = false;
     }
@@ -1245,9 +1369,9 @@
     if (builtinId && (action === "enable" || action === "disable")) {
       try {
         await setBuiltinEnabled(builtinId, action === "enable");
-        setMsg(action === "enable" ? "KPI enabled." : "KPI disabled.", "ok");
+        setMetricsMsg(action === "enable" ? "KPI enabled." : "KPI disabled.", "ok");
       } catch (err) {
-        setMsg(err.message || String(err), "err");
+        setMetricsMsg(err.message || String(err), "err");
       }
       return;
     }
@@ -1257,9 +1381,9 @@
     if (action === "enable" || action === "disable") {
       try {
         await setMetricEnabled(id, action === "enable");
-        setMsg(action === "enable" ? "KPI enabled." : "KPI disabled.", "ok");
+        setMetricsMsg(action === "enable" ? "KPI enabled." : "KPI disabled.", "ok");
       } catch (err) {
-        setMsg(err.message || String(err), "err");
+        setMetricsMsg(err.message || String(err), "err");
       }
       return;
     }
@@ -1271,9 +1395,9 @@
       try {
         await persistMetrics(metrics.filter((row) => row.id !== id));
         if (editingId === id) resetBuilder();
-        setMsg("Metric deleted.", "ok");
+        setMetricsMsg("Metric deleted.", "ok");
       } catch (err) {
-        setMsg(err.message || String(err), "err");
+        setMetricsMsg(err.message || String(err), "err");
       }
     }
   });
@@ -1326,7 +1450,7 @@
       wrap: cameraWrap,
       img: cameraPreview,
       onCommit: (roi) => {
-        persistRoi(roi).catch((err) => setMsg(err.message || String(err), "err"));
+        persistRoi(roi).catch((err) => setCheckMsg(err.message || String(err), "err"));
       },
       onClear: () => {
         cameraRoi = null;
@@ -1338,6 +1462,22 @@
     });
     window.addEventListener("resize", () => {
       if (roiDrawer) roiDrawer.refresh();
+    });
+  }
+
+  if (cameraCollapseBtn && cameraWrap) {
+    cameraCollapseBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const collapsed = cameraWrap.classList.toggle("is-collapsed");
+      cameraCollapseBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      cameraCollapseBtn.title = collapsed ? "Expand live camera" : "Minimize live camera";
+      cameraCollapseBtn.textContent = collapsed ? "▴" : "▾";
+      if (!collapsed) {
+        requestAnimationFrame(() => {
+          if (roiDrawer) roiDrawer.refresh();
+        });
+      }
     });
   }
 

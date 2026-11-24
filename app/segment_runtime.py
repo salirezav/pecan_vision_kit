@@ -709,6 +709,10 @@ def predict_roi_frame(
     half_area_sum = 0.0
     piece_area_sum = 0.0
     items: list[dict[str, Any]] = []
+    mass_marks: list[dict[str, Any]] = []
+    frame_h, frame_w = frame.shape[:2]
+    frame_w = max(1, int(frame_w))
+    frame_h = max(1, int(frame_h))
 
     has_masks = getattr(result, "masks", None) is not None and getattr(result.masks, "xy", None) is not None
     has_boxes = getattr(result, "boxes", None) is not None
@@ -756,6 +760,17 @@ def predict_roi_frame(
                     "area": round(area_i, 1),
                 }
             )
+            if class_id in half_ids or class_id in piece_ids:
+                anchor_x = float((mapped[:, 0].min() + mapped[:, 0].max()) / 2.0)
+                anchor_y = float(mapped[:, 1].min())
+                mass_marks.append(
+                    {
+                        "class": "half" if class_id in half_ids else "piece",
+                        "area": round(area_i, 1),
+                        "nx": round(anchor_x / frame_w, 5),
+                        "ny": round(anchor_y / frame_h, 5),
+                    }
+                )
 
     annotated = frame.copy() if draw else frame
     if draw:
@@ -779,6 +794,7 @@ def predict_roi_frame(
         "piece_area": float(piece_area_sum),
         "roi": clipped,
         "items": items[:40],
+        "mass_marks": mass_marks,
         "image": image,
         "task": task,
         "result_mode": "counts",

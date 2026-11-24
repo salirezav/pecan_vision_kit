@@ -32,28 +32,14 @@ class Page:
 
 PAGES: tuple[Page, ...] = (
     Page("index.html", "Overview", ROOT / "README.md", "Pecan Vision Kit"),
+    Page(
+        "open-the-dashboard.html",
+        "Connect",
+        DOCS / "open-the-dashboard.md",
+        "Open the dashboard · Pecan Vision Kit",
+    ),
     Page("user-guide.html", "Quick start", DOCS / "USER-GUIDE.md", "Quick start · Pecan Vision Kit"),
-    Page(
-        "ethernet-windows.html",
-        "Ethernet",
-        DOCS / "how to connect to pi via ethernet on windows.md",
-        "Ethernet on Windows · Pecan Vision Kit",
-    ),
-    Page(
-        "enable-vnc.html",
-        "VNC",
-        DOCS / "how to enable vnc.md",
-        "Enable VNC · Pecan Vision Kit",
-    ),
-    Page(
-        "kit-provisioning.html",
-        "Provisioning",
-        DOCS / "KIT-PROVISIONING.md",
-        "Kit provisioning · Pecan Vision Kit",
-    ),
     Page("admin.html", "Admin", DOCS / "ADMIN.md", "Admin · Pecan Vision Kit"),
-    Page("network.html", "Network", DOCS / "NETWORK.md", "Network · Pecan Vision Kit"),
-    Page("steps.html", "Build log", DOCS / "STEPS.md", "Build log · Pecan Vision Kit"),
 )
 
 

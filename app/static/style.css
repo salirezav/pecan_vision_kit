@@ -268,7 +268,7 @@ h1, h2, .reading {
 }
 .check-split {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 2fr 1fr;
   border-radius: var(--radius);
   overflow: hidden;
 }
@@ -554,13 +554,22 @@ img.video-player {
   background: rgba(196, 163, 90, 0.18);
   border: 1px solid #6b5428;
 }
-.video-list { display: grid; gap: 0.55rem; }
+.video-list {
+  --video-row-h: 3.35rem;
+  display: grid;
+  gap: 0.45rem;
+  align-content: start;
+  max-height: calc(10 * var(--video-row-h) + 9 * 0.45rem);
+  overflow-y: auto;
+  padding-right: 0.15rem;
+}
 .video-row {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.5rem;
   align-items: center;
-  padding: 0.55rem 0.65rem;
+  min-height: var(--video-row-h);
+  padding: 0.4rem 0.55rem;
   border-radius: var(--radius);
   border: 1px solid var(--line);
   background: var(--uga-white);
@@ -586,11 +595,46 @@ a.btn.disabled {
   text-align: left;
   cursor: pointer;
   display: grid;
-  gap: 0.2rem;
+  gap: 0.15rem;
   padding: 0;
+  min-width: 0;
+}
+.video-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .video-main span { color: var(--muted); font-size: 0.85rem; }
-.video-actions { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+.video-actions {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: nowrap;
+  flex: none;
+  align-items: center;
+}
+.btn.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.15rem;
+  min-width: 2.15rem;
+  height: 2.15rem;
+  min-height: 2.15rem;
+  padding: 0;
+  border-radius: 999px;
+  font-size: 0;
+  line-height: 0;
+}
+.btn.icon-btn .video-action-icon {
+  width: 1.05rem;
+  height: 1.05rem;
+  display: block;
+}
+a.btn.icon-btn {
+  text-decoration: none;
+  color: inherit;
+}
 .modal {
   position: fixed;
   inset: 0;
@@ -707,6 +751,138 @@ code { font-size: 0.92em; }
 }
 .model-side .panel {
   margin-bottom: 0;
+}
+.model-side .model-panel {
+  padding: 0.75rem 0.85rem;
+}
+.model-side .model-section-title {
+  font-size: 1.2rem;
+  margin: 0.1rem 0 0.2rem;
+}
+.model-side .hint {
+  font-size: 0.9rem;
+  margin: 0 0 0.55rem;
+  line-height: 1.35;
+}
+.model-side .model-accordion[open] > summary {
+  margin-bottom: 0.55rem;
+}
+.model-side .model-library {
+  margin: 0.2rem 0 0.55rem;
+}
+.model-side .model-list {
+  margin: 0.35rem 0 0.3rem;
+  gap: 0.3rem;
+}
+.model-side .model-pick {
+  padding: 0.4rem 1.85rem 0.4rem 0.55rem;
+}
+.model-side .model-card {
+  padding: 0.55rem 0.65rem;
+  margin: 0.4rem 0 0.55rem;
+}
+.model-side .form-grid {
+  gap: 0.55rem;
+}
+.model-side .calibration-panel {
+  margin: 0 0 0.55rem;
+  padding: 0.45rem 0.65rem;
+}
+.model-side .roi-controls {
+  margin: 0.45rem 0;
+  gap: 0.3rem;
+}
+.model-side .big-actions {
+  margin: 0.65rem 0;
+  gap: 0.55rem;
+}
+.model-side .speed-row {
+  margin-top: 0.55rem;
+}
+.upload-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.55rem;
+  align-items: end;
+}
+.upload-file-field {
+  display: grid;
+  gap: 0.3rem;
+  font-weight: 600;
+  min-width: 0;
+}
+.upload-file-hint {
+  margin: 0;
+  grid-column: 1 / -1;
+}
+.upload-row .btn {
+  white-space: nowrap;
+  min-height: 42px;
+  padding: 0.65rem 0.85rem;
+}
+.preview-media {
+  position: relative;
+  line-height: 0;
+}
+.preview-collapse-btn {
+  position: absolute;
+  z-index: 5;
+  right: 0.55rem;
+  bottom: calc(0.55rem + 2.35rem);
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.preview-wrap.is-collapsed .preview-media {
+  display: none;
+}
+.preview-wrap.is-collapsed .roi-overlay {
+  display: none !important;
+}
+.preview-wrap.is-collapsed .preview-collapse-btn {
+  bottom: 0.45rem;
+}
+.preview-wrap.is-collapsed .preview-caption {
+  padding-right: 2.75rem;
+}
+.mass-marks {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 3;
+  pointer-events: none;
+  overflow: hidden;
+}
+.mass-marks[hidden] {
+  display: none !important;
+}
+.mass-mark {
+  position: absolute;
+  transform: translate(-50%, -120%);
+  padding: 0.12rem 0.4rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+.mass-mark.half {
+  border-color: rgba(186, 12, 47, 0.85);
+}
+.mass-mark.piece {
+  border-color: rgba(0, 79, 89, 0.85);
 }
 .model-accordion > summary {
   position: relative;

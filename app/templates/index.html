@@ -15,8 +15,10 @@
       <p class="hint">Point the camera at the line, then press Start. Press Stop when finished.</p>
       <div id="storage-status" class="storage-status" hidden></div>
       <div class="big-actions">
-        <button id="btn-start" class="btn start" type="button">Start recording</button>
-        <button id="btn-stop" class="btn stop" type="button">Stop recording</button>
+        <div class="check-split" role="group" aria-label="Recording">
+          <button id="btn-start" class="btn keep" type="button">Start recording</button>
+          <button id="btn-stop" class="btn stop" type="button">Stop recording</button>
+        </div>
         <button id="btn-snap" class="btn snap" type="button">Take snapshot</button>
       </div>
       <p id="msg" class="msg" aria-live="polite"></p>

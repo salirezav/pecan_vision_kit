@@ -2,21 +2,24 @@
 
 ## Open the admin page
 
-- From config AP: `http://10.42.0.1:8080/admin`
-- From Ethernet / localhost: `http://<pi-ip>:8080/admin` or `http://localhost:8080/admin`
+Use the same address as the dashboard, with `/admin` at the end.
+
+- Over the Ethernet cable: `http://usda-vision-08.local:8080/admin` (use the number on your label)
+- After the kit is on Wi-Fi: `http://192.168.137.64:8080/admin` (use the Wi-Fi numbers you wrote down)
+- On the Pi itself: `http://localhost:8080/admin`
 
 From there you can **start / stop / restart** the `pecan-vision` service, see disk space, camera status, network, and recent logs.
 
 ## VNC into the Pi
 
-WayVNC is part of Raspberry Pi OS and is already enabled on the first kit.
+The kit’s desktop is already available over VNC. The full steps are in [Open the dashboard](open-the-dashboard.md).
 
-1. Connect to the Pi (config AP or plant Ethernet).
-2. Use RealVNC Viewer / TigerVNC / similar → Pi IP (`10.42.0.1` on the AP).
-3. Log in as the kit user (`pecan` on shipped kits — never a shared campus account).
-4. Open a terminal or browser as needed.
+1. Keep the Ethernet cable connected for the first connection.
+2. In RealVNC Viewer, or another VNC app, connect to `usda-vision-08.local:5900` (use the number on your label).
+3. Log in as `pecan`. The password is the kit’s name on the label followed immediately by `1234`. Kit `usda-vision-08` uses `usda-vision-081234`.
+4. Open a terminal or browser on the Pi’s desktop as needed.
 
-Provisioning, passwords, and Desktop launchers: see [KIT-PROVISIONING.md](KIT-PROVISIONING.md).
+Opening the dashboard from a laptop is covered in [Open the dashboard](open-the-dashboard.md).
 
 Useful terminal commands:
 
@@ -59,7 +62,7 @@ On click, `scripts/apply-update.sh` downloads the release tarball, verifies `SHA
 - Apply log: `/mnt/recordings/update-apply.log`
 - Recordings and `/mnt/recordings/config.yaml` are left alone
 - Model weights under `weights/` are left alone
-- The config Wi‑Fi AP alone does not provide GitHub access
+- The kit needs a path to the internet before an update can download. That path is the Wi-Fi network the kit has joined, or an Ethernet connection that reaches the internet.
 
 Re-run `./scripts/setup-kit.sh` option **4** (web service) after pulling updater changes so `/etc/sudoers.d/pecan-vision` includes the apply-update path.
 
@@ -78,17 +81,6 @@ When enabled, desktop login opens Chromium fullscreen to `http://127.0.0.1:8080`
 - Enable / re-install: `./scripts/setup-kit.sh` → option **7**
 - Disable: delete `~/.config/autostart/pecan-vision-kiosk.desktop` (or uncheck in session autostart settings)
 - Manual test: `~/pecan-vision-kit/scripts/start-kiosk.sh`
-
-## Access Point (kit 01 status)
-
-Always-on AP (`PecanCam-XX` on `wlan0`) is documented in `docs/NETWORK.md` but **not activated on kit 01 yet** (would drop the current Wi‑Fi client). Prefer Ethernet on `eth0`, then:
-
-```bash
-./scripts/setup-kit.sh   # option 5 — Access Point only
-# or later: sudo nmcli connection up PecanCam-AP
-```
-
-Credentials (when created) live in `config/ap-credentials.txt` (chmod 600; gitignored).
 
 ## Re-run setup on a kit
 
