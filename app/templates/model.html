@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 {% extends "base.html" %}
 {% block title %}Model — Pecan Vision Kit {{ kit_id }}{% endblock %}
 {% block content %}
@@ -150,3 +151,157 @@
 <script src="{{ url_for('static', filename='calibration-ui.js') }}"></script>
 <script src="{{ url_for('static', filename='model.js') }}"></script>
 {% endblock %}
+=======
+{% extends "base.html" %}
+{% block title %}Model — Pecan Vision Kit {{ kit_id }}{% endblock %}
+{% block content %}
+<section class="model-layout">
+  <div class="model-stage">
+    <div class="model-views">
+      <div class="preview-wrap" id="camera-wrap">
+        <div class="preview-media">
+          <img id="camera-preview" class="preview" src="{{ url_for('camera.video_feed') }}" alt="Live camera preview">
+        </div>
+        <button id="btn-camera-collapse" class="preview-collapse-btn" type="button" aria-expanded="true" aria-controls="camera-preview" title="Minimize live camera">▾</button>
+        <div class="preview-caption">Live camera</div>
+      </div>
+      <div class="preview-wrap" id="result-wrap">
+        <div class="preview-media">
+          <img id="result" class="preview" alt="Model result" hidden>
+          <div id="mass-marks" class="mass-marks" hidden></div>
+          <div id="result-empty" class="result-empty">The model result will show up here.</div>
+        </div>
+        <div id="result-caption" class="preview-caption">Model result</div>
+      </div>
+    </div>
+
+    <div class="model-side">
+      <section class="panel model-panel">
+        <details class="model-accordion" open>
+        <summary id="model-panel-title" class="model-section-title">
+          <span class="model-summary-line">
+            <span class="model-summary-label">Select Model</span>
+            <span id="model-selected-name" class="model-selected-name"></span>
+          </span>
+          <span id="model-selected-tip" class="model-selected-tip" role="tooltip" aria-hidden="true"></span>
+        </summary>
+        <p class="hint">Pick a saved weights file to see what it is. Half-yield and Crack Analyst each keep their own calibration. Open <a href="{{ url_for('ui.deploy_page') }}">Deploy</a> for live charts.</p>
+        <div class="model-library">
+          <p id="model-library-hint" class="hint">Uploaded weights stay on this kit. Select one to use for inference.</p>
+          <ul id="model-list" class="model-list" aria-label="Models on this kit"></ul>
+          <p id="model-list-empty" class="msg">No weights saved yet.</p>
+        </div>
+        <p id="model-status" class="msg">Looking for a model…</p>
+        <div id="model-card" class="model-card" hidden>
+          <p id="model-kind" class="model-kind"></p>
+          <p id="model-does" class="model-summary"></p>
+          <dl id="model-facts" class="model-facts"></dl>
+          <p id="model-names-note" class="hint"></p>
+          <ul id="class-chips" class="class-chips"></ul>
+          <p id="model-library" class="msg err" hidden></p>
+        </div>
+
+        <form id="upload-form" class="form-grid">
+          <div class="upload-row">
+            <label class="upload-file-field">Weights file
+              <input id="weights-file" name="file" type="file" accept=".pt,.pth,.hef,.zip,application/zip,application/x-zip-compressed">
+            </label>
+            <button id="btn-upload" class="btn primary" type="submit">Upload model</button>
+          </div>
+          <p class="hint upload-file-hint">Accepts .pt / .pth, .hef, or a Hailo export .zip (HEF + metadata.yaml).</p>
+          <label id="names-field" class="wide">Class names, in order
+            <input id="class-names" name="class_names" type="text" placeholder="Leave blank to use the names stored in the file" autocomplete="off">
+          </label>
+          <div class="row-actions">
+            <button id="btn-names" class="btn" type="button">Save names</button>
+          </div>
+        </form>
+        <p id="model-msg" class="msg" aria-live="polite"></p>
+        </details>
+      </section>
+
+      <section class="panel model-panel model-check" aria-labelledby="check-panel-title">
+        <h2 id="check-panel-title" class="model-section-title">Check &amp; Optimize Model</h2>
+        <p class="hint">Run the selected model on the live camera.</p>
+        <details id="calibration" class="panel calibration-panel">
+          <summary>Calibration</summary>
+          <p id="calibration-hint" class="hint">Per-class confidence. Changes save automatically and apply on the next frame.</p>
+          <div id="calibration-sliders" class="sliders"></div>
+        </details>
+        <label id="speed-row" class="speed-row">Speed
+          <select id="speed">
+            <option value="fast" selected>Fast</option>
+            <option value="balanced">Balanced</option>
+            <option value="accurate">Accurate</option>
+          </select>
+        </label>
+
+        <div class="roi-controls">
+          <p class="hint">Draw a region on the live camera. Cleared means the whole frame. Deploy uses this same region.</p>
+          <p id="roi-status" class="msg">Using the full frame.</p>
+          <div class="row-actions">
+            <button id="btn-roi-redraw" class="btn" type="button">Redraw region</button>
+            <button id="btn-roi-clear" class="btn" type="button">Clear region</button>
+          </div>
+        </div>
+
+        <div class="big-actions">
+          <button id="btn-check" class="btn start" type="button">Check this frame</button>
+          <div class="check-split" role="group" aria-label="Keep checking">
+            <button id="btn-start" class="btn keep" type="button">Keep checking</button>
+            <button id="btn-stop" class="btn stop" type="button" disabled>Stop checking</button>
+          </div>
+        </div>
+        <p id="msg" class="msg" aria-live="polite"></p>
+        <div id="counts" class="class-list"></div>
+      </section>
+    </div>
+  </div>
+
+  <div id="metrics-panel" class="metrics-panel model-metrics" hidden>
+    <div class="metrics-panel-head">
+      <h2 class="metrics-title">Metrics to extract</h2>
+      <button id="btn-reset-run" class="btn" type="button">Reset run</button>
+    </div>
+    <p id="metrics-msg" class="msg" aria-live="polite"></p>
+    <p id="metrics-note" class="hint"></p>
+    <div id="metrics-list" class="metrics-list"></div>
+    <form id="metric-form" class="metric-form">
+      <h3 class="metric-form-title">Create custom formula</h3>
+      <label class="wide">Name
+        <input id="metric-name" type="text" maxlength="80" placeholder="Pick a name for this formula/KPI you are building" autocomplete="off">
+      </label>
+      <label class="wide">Formula
+        <div class="metric-formula-wrap">
+          <input id="metric-formula-input" type="text" maxlength="400"
+            placeholder="100 * count(pecan_uncracked) / (count(pecan_uncracked) + count(pecan_hairline) + …)"
+            autocomplete="off" spellcheck="false">
+          <ul id="metric-formula-suggest" class="metric-formula-suggest" hidden></ul>
+        </div>
+      </label>
+      <div class="metric-formula-help">
+        <p id="metric-formula-hint" class="hint">Use count(Class) or area(Class) with + − * / and parentheses. Type a class name after count( or area( to pick from suggestions.</p>
+        <p class="metric-examples-label">Examples</p>
+        <ul class="metric-formula-examples">
+          <li><code>count(pecan_uncracked)</code> — how many of one class</li>
+          <li><code>100 * count(pecan_uncracked) / (count(pecan_uncracked) + count(pecan_hairline))</code> — one class as a percent of two classes</li>
+          <li><code>area(kernel_broken) / (area(kernel_broken) + area(kernel_half))</code> — one class’s pixel area divided by the area of two classes</li>
+        </ul>
+      </div>
+      <p id="metric-formula" class="metric-formula" hidden></p>
+      <div class="row-actions">
+        <button id="btn-metric-save" class="btn primary" type="submit">Save metric</button>
+        <button id="btn-metric-cancel" class="btn" type="button" hidden>Cancel edit</button>
+      </div>
+    </form>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='roi-draw.js') }}"></script>
+<script src="{{ url_for('static', filename='metric-formula.js') }}"></script>
+<script src="{{ url_for('static', filename='calibration-ui.js') }}"></script>
+<script src="{{ url_for('static', filename='model.js') }}"></script>
+{% endblock %}
+>>>>>>> 88aeec995734a46bdc17b17edad6836fdba9ef7f
