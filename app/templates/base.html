@@ -15,9 +15,9 @@
       </div>
       <nav>
         <a href="{{ url_for('ui.index') }}#record">Record</a>
-        <a href="{{ url_for('ui.index') }}#camera-settings">Camera Settings</a>
+        <a href="{{ url_for('ui.index') }}#camera-settings" title="Camera Settings">Camera<span class="nav-full"> Settings</span></a>
         <span class="nav-divider" aria-hidden="true">|</span>
-        <a href="{{ url_for('ui.videos_page') }}">Videos &amp; Pictures</a>
+        <a href="{{ url_for('ui.videos_page') }}" title="Videos &amp; Pictures">Videos<span class="nav-full"> &amp; Pictures</span></a>
         <span class="nav-divider" aria-hidden="true">|</span>
         <a href="{{ url_for('ui.model_page') }}">Model</a>
         <a href="{{ url_for('ui.deploy_page') }}">Deploy</a>
