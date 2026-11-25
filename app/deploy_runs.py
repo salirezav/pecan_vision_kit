@@ -55,12 +55,23 @@ def _class_columns(class_names: list[str]) -> list[str]:
     return cols
 
 
-def _metric_columns(metrics: list[dict[str, Any]]) -> list[str]:
-    cols: list[str] = []
-    for metric in metrics:
-        mid = re.sub(r"[^A-Za-z0-9_]+", "_", str(metric.get("id") or "metric")).strip("_")
-        cols.append(f"{mid}_value")
-    return cols
+def _metric_column_name(metric: dict[str, Any], used: set[str]) -> str:
+    """CSV header for a saved metric: its Model-page name, not its id."""
+    label = re.sub(r"\s+", " ", str(metric.get("name") or "").strip())
+    if not label:
+        label = "metric"
+    candidate = label
+    suffix = 2
+    while candidate in used:
+        candidate = f"{label} {suffix}"
+        suffix += 1
+    used.add(candidate)
+    return candidate
+
+
+def _metric_columns(metrics: list[dict[str, Any]], reserved: set[str] | None = None) -> list[str]:
+    used = set(reserved or ())
+    return [_metric_column_name(metric, used) for metric in metrics]
 
 
 def _pecan_columns() -> list[str]:
@@ -89,20 +100,16 @@ def _header(
     *,
     halfyield: bool = False,
 ) -> list[str]:
-    cols = [
+    leading = [
         "timestamp_iso",
         "elapsed_ms",
         "threshold",
         "speed",
         "sample_interval_sec",
         *_class_columns(class_names),
-        *_metric_columns(metrics),
     ]
-    if halfyield:
-        cols.extend(_halfyield_columns())
-    else:
-        cols.extend(_pecan_columns())
-    return cols
+    trailing = _halfyield_columns() if halfyield else _pecan_columns()
+    return [*leading, *_metric_columns(metrics, set(leading) | set(trailing)), *trailing]
 
 
 def open_run(
