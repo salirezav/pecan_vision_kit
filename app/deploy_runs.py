@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import re
+import shutil
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -286,6 +287,13 @@ def list_runs(limit: int = 50) -> list[dict[str, Any]]:
         if len(rows) >= limit:
             break
     return rows
+
+
+def delete_run(run_id: str) -> None:
+    folder = run_dir(run_id)
+    if not folder.is_dir():
+        raise FileNotFoundError(run_id)
+    shutil.rmtree(folder)
 
 
 def get_run(run_id: str, *, max_rows: int = 5000) -> dict[str, Any]:

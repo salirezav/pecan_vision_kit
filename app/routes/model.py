@@ -320,6 +320,22 @@ def api_deploy_runs_get(run_id: str):
         return jsonify({"ok": False, "error": str(exc)}), 500
 
 
+@bp.route("/api/deploy/runs/<run_id>", methods=["DELETE"])
+def api_deploy_runs_delete(run_id: str):
+    try:
+        status = rt.deploy_live.status()
+        if status.get("running") and status.get("run_id") == run_id:
+            return jsonify({"ok": False, "error": "Stop the live run before deleting it."}), 409
+        deploy_runs.delete_run(run_id)
+        return jsonify({"ok": True})
+    except FileNotFoundError:
+        return jsonify({"ok": False, "error": "That run was not found."}), 404
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
 @bp.route("/api/deploy/runs/<run_id>/csv", methods=["GET"])
 def api_deploy_runs_csv(run_id: str):
     try:

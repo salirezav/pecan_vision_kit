@@ -47,6 +47,7 @@
   let pecanReady = false;
   let pollTimer = null;
   let runId = null;
+  let openRunId = null;
   let roiDrawer = null;
   let halfyield = false;
   let halfShare = null;
@@ -581,9 +582,12 @@
       runsListEl.innerHTML = runs.map((run) => {
         const frames = run.frames == null ? "—" : String(run.frames);
         const when = run.started_at ? escapeHtml(String(run.started_at).replace("T", " ").slice(0, 19)) : escapeHtml(run.id);
+        const id = escapeHtml(run.id);
+        const locked = live && run.id === runId;
         return (
-          "<button type=\"button\" class=\"run-row\" data-run-id=\"" +
-          escapeHtml(run.id) +
+          "<div class=\"run-row\">" +
+          "<button type=\"button\" class=\"run-main\" data-run-id=\"" +
+          id +
           "\"><strong>" +
           when +
           "</strong><span>" +
@@ -591,7 +595,17 @@
           " samples · " +
           escapeHtml(run.status || "") +
           (run.model_filename ? " · " + escapeHtml(run.model_filename) : "") +
-          "</span></button>"
+          "</span></button>" +
+          "<div class=\"run-actions\">" +
+          "<a class=\"btn small\" href=\"/api/deploy/runs/" +
+          encodeURIComponent(run.id) +
+          "/csv\">Download CSV</a>" +
+          "<button type=\"button\" class=\"btn small danger\" data-delete-run=\"" +
+          id +
+          "\"" +
+          (locked ? " disabled title=\"Stop the live run before deleting it.\"" : "") +
+          ">Delete</button>" +
+          "</div></div>"
         );
       }).join("");
     } catch (err) {
@@ -606,6 +620,7 @@
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error || "Could not open that run.");
       const samples = data.samples || [];
+      openRunId = id;
       runDetailEl.hidden = false;
       if (runCsvEl) runCsvEl.href = "/api/deploy/runs/" + encodeURIComponent(id) + "/csv";
       if (!samples.length) {
@@ -629,9 +644,34 @@
     }
   }
 
+  async function deleteRun(id) {
+    if (!id) return;
+    if (!window.confirm("Delete this run? Its CSV will be removed.")) return;
+    try {
+      const response = await fetch("/api/deploy/runs/" + encodeURIComponent(id), { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || "Could not delete that run.");
+      if (openRunId === id && runDetailEl) {
+        openRunId = null;
+        runDetailEl.hidden = true;
+        if (runTableWrap) runTableWrap.innerHTML = "";
+      }
+      setMsg("Run deleted.", "ok");
+      refreshRuns();
+    } catch (err) {
+      setMsg(err.message || String(err), "err");
+    }
+  }
+
   if (runsListEl) {
     runsListEl.addEventListener("click", (event) => {
-      const button = event.target.closest("[data-run-id]");
+      const del = event.target.closest("[data-delete-run]");
+      if (del) {
+        if (del.disabled) return;
+        deleteRun(del.getAttribute("data-delete-run"));
+        return;
+      }
+      const button = event.target.closest(".run-main");
       if (!button) return;
       openRun(button.getAttribute("data-run-id"));
     });
