@@ -23,7 +23,7 @@
       .replace(/"/g, "&quot;");
   }
 
-  function renderLastStatus(host, last) {
+  function renderLastStatus(host, last, onDismiss) {
     if (!last || !last.state) return;
     if (last.state === "ok") {
       host.innerHTML = `<div class="update-banner update-banner-ok" role="status">
@@ -46,7 +46,33 @@
     }
     host.querySelector("[data-dismiss-update]")?.addEventListener("click", () => {
       host.innerHTML = "";
+      if (typeof onDismiss === "function") onDismiss();
     });
+  }
+
+  function dismissKey(last) {
+    const at = Number(last && last.updated_at);
+    const stamp = Number.isFinite(at) ? String(Math.round(at * 1000)) : "";
+    return `pecan-dismiss-update-${last.state}-${last.target_version}-${stamp}`;
+  }
+
+  function wasDismissed(last) {
+    if (!last) return false;
+    if (last.dismissed) return true;
+    try {
+      return localStorage.getItem(dismissKey(last)) === "1";
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function persistDismiss(last) {
+    try {
+      localStorage.setItem(dismissKey(last), "1");
+    } catch (_) {
+      /* private mode or storage disabled */
+    }
+    fetch("/api/update/dismiss", { method: "POST", cache: "no-store" }).catch(() => {});
   }
 
   function renderAvailable(host, data) {
@@ -149,8 +175,11 @@
       renderLastStatus(host, data.last_status);
       return;
     }
-    if (data.last_status && data.last_status.state === "failed") {
-      renderLastStatus(host, data.last_status);
+    if (data.last_status && data.last_status.state === "failed" && !wasDismissed(data.last_status)) {
+      renderLastStatus(host, data.last_status, () => {
+        persistDismiss(data.last_status);
+        if (data.update_available) renderAvailable(host, data);
+      });
       if (data.update_available) {
         const retry = document.createElement("div");
         host.appendChild(retry);
@@ -158,17 +187,12 @@
       }
       return;
     }
-    if (data.last_status && data.last_status.state === "ok") {
-      const key = `pecan-dismiss-update-${data.last_status.target_version}-${data.last_status.updated_at}`;
-      if (!sessionStorage.getItem(key)) {
-        renderLastStatus(host, data.last_status);
-        host.querySelector("[data-dismiss-update]")?.addEventListener("click", () => {
-          sessionStorage.setItem(key, "1");
-          host.innerHTML = "";
-          if (data.update_available) renderAvailable(host, data);
-        });
-        return;
-      }
+    if (data.last_status && data.last_status.state === "ok" && !wasDismissed(data.last_status)) {
+      renderLastStatus(host, data.last_status, () => {
+        persistDismiss(data.last_status);
+        if (data.update_available) renderAvailable(host, data);
+      });
+      return;
     }
     if (data.update_available) {
       renderAvailable(host, data);

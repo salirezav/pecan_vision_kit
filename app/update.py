@@ -69,6 +69,25 @@ def write_update_status(data: dict[str, Any]) -> None:
     UPDATE_STATUS_PATH.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
+_DISMISSABLE_STATES = frozenset({"ok", "failed"})
+
+
+def dismiss_update_status() -> bool:
+    """Remember that the finished update banner was dismissed.
+
+    A later update rewrites the status file without this flag, so the next
+    result shows again. An update that is still running is left alone.
+    """
+    data = read_update_status()
+    if not data or data.get("state") not in _DISMISSABLE_STATES:
+        return False
+    if data.get("dismissed") is True:
+        return True
+    data["dismissed"] = True
+    write_update_status(data)
+    return True
+
+
 def _load_cache() -> dict[str, Any] | None:
     if not CACHE_PATH.exists():
         return None

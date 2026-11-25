@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from flask import Blueprint, jsonify, request
 
-from update import check_for_update, start_apply_update, version_label
+from update import check_for_update, dismiss_update_status, start_apply_update, version_label
 import runtime as rt
 
 bp = Blueprint("system", __name__)
@@ -81,6 +81,10 @@ def api_update_apply():
             "target_version": release.get("latest_version"),
         }
     )
+
+@bp.route("/api/update/dismiss", methods=["POST"])
+def api_update_dismiss():
+    return jsonify({"ok": True, "dismissed": dismiss_update_status()})
 
 @bp.route("/api/activity")
 def api_activity():
