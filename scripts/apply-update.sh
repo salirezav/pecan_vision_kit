@@ -76,7 +76,7 @@ fail() {
   exit 1
 }
 
-backup_items=(app scripts systemd docs config VERSION LICENSE README.md .gitignore)
+backup_items=(app scripts systemd docs config models VERSION LICENSE README.md .gitignore)
 
 snapshot_tree() {
   local dest="$1"
@@ -207,6 +207,8 @@ save_host_config
 systemctl stop "$SERVICE" || true
 sleep 1
 
+# Include shipped weights under models/ before the general *.pt exclude.
+# Other .pt/.pth files stay put, including anything under weights/.
 rsync -a --delete \
   --exclude '.venv/' \
   --exclude 'weights/' \
@@ -214,6 +216,8 @@ rsync -a --delete \
   --exclude '.git/' \
   --exclude '__pycache__/' \
   --exclude 'dist/' \
+  --include '/models/' \
+  --include '/models/**' \
   --exclude '*.pt' \
   --exclude '*.pth' \
   "$SRC/" "$KIT_ROOT/"
@@ -303,4 +307,7 @@ fi
 
 write_status "ok" "Updated to $VERSION successfully"
 log "Update to $VERSION complete"
+if [[ -d "$KIT_ROOT/models" ]]; then
+  log "Shipped models are in $KIT_ROOT/models. The dashboard asks before copying new ones into the library."
+fi
 exit 0

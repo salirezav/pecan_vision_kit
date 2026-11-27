@@ -285,6 +285,10 @@ ${GREEN}${BLD}Bootstrap complete.${RST}
 For AP / NVMe format / kiosk options, run the interactive installer:
   $KIT_ROOT/scripts/setup-kit.sh
 
+Shipped models live in models/. The dashboard asks before copying any that
+are not already in the model library. To copy them from a terminal:
+  $KIT_ROOT/scripts/install-bundled-models.sh
+
 EOF
 }
 

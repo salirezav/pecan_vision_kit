@@ -10,6 +10,11 @@ ARCHITECTURE.md
 *.avi
 *.pt
 *.pth
+# Shipped weights. The dashboard asks before copying these into the model library.
+!models/*.pt
+!models/*.pth
+!models/*.hef
+!models/*.zip
 .previews/
 .DS_Store
 dist/

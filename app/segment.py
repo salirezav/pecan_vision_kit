@@ -419,6 +419,7 @@ class ModelService:
             "halfyield": halfyield,
             "calibration": calibration,
             **view,
+            "bundled_available": self.bundled_pending(),
         }
 
     def get_calibration(self) -> dict[str, Any]:
@@ -498,6 +499,163 @@ class ModelService:
         self._loaded = False
         self._error = None
         return self.status()
+
+    def bundled_dir(self) -> Path:
+        return self.root / "models"
+
+    def _dismissed_path(self) -> Path:
+        return self.library_dir() / ".bundled-dismissed.json"
+
+    def _read_dismissed(self) -> dict[str, Any]:
+        data = self._read_json(self._dismissed_path())
+        cleaned: dict[str, Any] = {}
+        for key, value in data.items():
+            if not isinstance(key, str) or not key or key != Path(key).name:
+                continue
+            if isinstance(value, dict):
+                cleaned[key] = value
+        return cleaned
+
+    def _write_dismissed(self, record: dict[str, Any]) -> None:
+        self.library_dir().mkdir(parents=True, exist_ok=True)
+        self._dismissed_path().write_text(json.dumps(record, indent=2) + "\n")
+
+    def _bundled_sources(self) -> list[Path]:
+        folder = self.bundled_dir()
+        if not folder.is_dir():
+            return []
+        found: list[Path] = []
+        for path in folder.iterdir():
+            if not path.is_file() or path.name.startswith("."):
+                continue
+            if path.suffix.lower() not in _UPLOAD_SUFFIXES:
+                continue
+            found.append(path)
+        found.sort(key=lambda item: item.name.casefold())
+        return found
+
+    def bundled_catalog(self) -> list[dict[str, Any]]:
+        """Models shipped in models/, and whether the library already has each one."""
+        installed = {path.name for path in self._weight_files()}
+        dismissed = self._read_dismissed()
+        rows: list[dict[str, Any]] = []
+        for source in self._bundled_sources():
+            try:
+                dest_name = library_weights_name(source.name)
+            except ValueError:
+                continue
+            try:
+                size = int(source.stat().st_size)
+            except OSError:
+                continue
+            record = dismissed.get(source.name)
+            same_size = isinstance(record, dict) and int(record.get("bytes") or -1) == size
+            rows.append(
+                {
+                    "filename": source.name,
+                    "id": dest_name,
+                    "bytes": size,
+                    "installed": dest_name in installed,
+                    "dismissed": bool(same_size) and dest_name not in installed,
+                }
+            )
+        return rows
+
+    def bundled_pending(self) -> list[dict[str, Any]]:
+        """Shipped models that are not in the library and were not dismissed."""
+        return [
+            row
+            for row in self.bundled_catalog()
+            if not row["installed"] and not row["dismissed"]
+        ]
+
+    def dismiss_bundled(self, filenames: list[str] | None = None) -> dict[str, Any]:
+        sources = {path.name: path for path in self._bundled_sources()}
+        if filenames is None:
+            chosen = [row["filename"] for row in self.bundled_pending()]
+        else:
+            chosen = []
+            for raw in filenames:
+                name = Path(str(raw or "")).name
+                if name not in sources:
+                    raise ValueError(f"No shipped model named {name}.")
+                chosen.append(name)
+        record = self._read_dismissed()
+        for name in chosen:
+            record[name] = {"bytes": int(sources[name].stat().st_size)}
+        if chosen:
+            self._write_dismissed(record)
+        return {"bundled_available": self.bundled_pending()}
+
+    def install_bundled(self, filenames: list[str] | None = None) -> dict[str, Any]:
+        """Copy shipped models into the library. Does not replace one already stored."""
+        if self._infer.busy:
+            raise ModelBusy("The model is already working. Wait for it to finish.")
+        sources = {path.name: path for path in self._bundled_sources()}
+        if filenames is None:
+            wanted = [row["filename"] for row in self.bundled_pending()]
+        else:
+            wanted = []
+            for raw in filenames:
+                name = Path(str(raw or "")).name
+                if name not in sources:
+                    raise ValueError(f"No shipped model named {name}.")
+                wanted.append(name)
+        installed: list[dict[str, str]] = []
+        skipped: list[str] = []
+        errors: list[dict[str, str]] = []
+        for name in wanted:
+            source = sources[name]
+            dest_name = library_weights_name(source.name)
+            dest = self.library_dir() / dest_name
+            if dest.exists():
+                skipped.append(name)
+                continue
+            try:
+                self._install_bundled_file(source, dest, dest_name)
+            except Exception as exc:  # noqa: BLE001
+                errors.append({"filename": name, "error": str(exc)})
+                continue
+            installed.append({"filename": name, "id": dest_name})
+        if installed:
+            self._mark_seeded()
+            files = self._weight_files()
+            active = self._active_id()
+            if files and not any(path.name == active for path in files):
+                self._set_active(files[0].name)
+        return {
+            "bundled_installed": installed,
+            "bundled_skipped": skipped,
+            "bundled_errors": errors,
+            "bundled_available": self.bundled_pending(),
+        }
+
+    def _install_bundled_file(self, source: Path, dest: Path, dest_name: str) -> None:
+        self.library_dir().mkdir(parents=True, exist_ok=True)
+        suffix = source.suffix.lower()
+        staging = self.library_dir() / f".bundled-{uuid.uuid4().hex}"
+        created: Path | None = None
+        try:
+            if suffix == ".zip":
+                extract_hailo_export_zip(source, staging)
+                created = staging
+                staging.rename(dest)
+            else:
+                temp = staging.with_suffix(suffix or ".bin")
+                shutil.copy2(source, temp)
+                created = temp
+                temp.replace(dest)
+            created = None
+        except Exception:
+            if created is not None and created.exists():
+                self._remove_library_entry(created)
+            raise
+        if dest.name != dest_name:
+            raise RuntimeError(f"Could not store {source.name} as {dest_name}.")
+        try:
+            self._write_meta(dest, source.name, [])
+        except Exception as exc:  # noqa: BLE001
+            self._store_inspect_failure(dest, source.name, exc)
 
     def select_model(self, model_id: str) -> dict[str, Any]:
         if self._infer.busy:

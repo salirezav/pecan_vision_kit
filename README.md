@@ -49,13 +49,21 @@ After installing Hailo packages on a fresh board, reboot once if `/dev/hailo0` i
 
 ## Model weights
 
-`.pt` / `.pth` files are **not** shipped in this repository (they are gitignored). Place models under `weights/` on each kit, or upload them from the **Model** page. The page reads the task and class list from the file when the checkpoint stores them. RF-DETR segmentation files and YOLO checkpoints (detection, segmentation, classification, pose, rotated boxes, semantic segmentation, and depth) can be loaded. YOLO support uses [Ultralytics](https://github.com/ultralytics/ultralytics), which is AGPL-3.0. App updates do not replace local weights.
+Releases include the models in `models/` (half-yield and Crack Analyst). After an update, every dashboard page asks before copying any that are not already in the model library at `/mnt/recordings/models/library`. From a terminal on the kit:
+
+```bash
+./scripts/install-bundled-models.sh
+```
+
+The script lists the new models and copies them only if you say yes. Pass `--yes` to copy without a prompt. A model already in the library is left as it is.
+
+You can still upload a `.pt`, `.pth`, `.hef`, or Hailo export `.zip` from the **Model** page. The page reads the task and class list from the file when the checkpoint stores them. RF-DETR segmentation files and YOLO checkpoints (detection, segmentation, classification, pose, rotated boxes, semantic segmentation, and depth) can be loaded. YOLO support uses [Ultralytics](https://github.com/ultralytics/ultralytics), which is AGPL-3.0. App updates do not replace models already saved in the library, or files under `weights/`.
 
 ## Updates
 
 Kits install newer versions from the public [GitHub Releases](https://github.com/salirezav/pecan_vision_kit/releases) page. The kit downloads the release with plain `curl`. A GitHub login is not required.
 
-The Pi needs a path to the internet, usually Ethernet. The config Wi-Fi access point alone cannot reach GitHub. Stop any recording before you update. Recordings, `/mnt/recordings/config.yaml`, and model files under `weights/` stay on the kit.
+The Pi needs a path to the internet, usually Ethernet. The config Wi-Fi access point alone cannot reach GitHub. Stop any recording before you update. Recordings, `/mnt/recordings/config.yaml`, and model files under `weights/` stay on the kit. New files under `models/` arrive with the release. The dashboard asks before copying those into the model library.
 
 ### From the dashboard or Desktop
 
