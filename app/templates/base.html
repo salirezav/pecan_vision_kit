@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -58,3 +59,65 @@
   {% block scripts %}{% endblock %}
 </body>
 </html>
+=======
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Pecan Vision Kit{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="top">
+    <div class="top-bar">
+      <div class="brand">
+        <span class="brand-mark">Pecan Vision</span>
+        <span class="kit">Kit {{ kit_id|default('??') }}</span>
+      </div>
+      <nav>
+        <a href="{{ url_for('ui.index') }}#record">Record</a>
+        <a href="{{ url_for('ui.index') }}#camera-settings" title="Camera Settings">Camera<span class="nav-full"> Settings</span></a>
+        <span class="nav-divider" aria-hidden="true">|</span>
+        <a href="{{ url_for('ui.videos_page') }}" title="Videos &amp; Pictures">Videos<span class="nav-full"> &amp; Pictures</span></a>
+        <span class="nav-divider" aria-hidden="true">|</span>
+        <a href="{{ url_for('ui.model_page') }}">Model</a>
+        <a href="{{ url_for('ui.deploy_page') }}">Deploy</a>
+        <a href="{{ url_for('ui.review_page') }}">Review</a>
+        <span class="nav-divider" aria-hidden="true">|</span>
+        <a href="{{ url_for('ui.admin_page') }}">Admin</a>
+      </nav>
+    </div>
+    <div id="activity-slot" class="activity-slot" aria-label="Active jobs"></div>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <footer>
+    <p>Videos and pictures save to the kit’s storage drive. Need help? Open <strong>Admin</strong>.</p>
+    <p class="version">Software {{ app_version_label|default(app_version|default('?')) }}</p>
+  </footer>
+  <script>
+    (function () {
+      const header = document.querySelector("header.top");
+      if (!header) return;
+      function syncNavHeight() {
+        document.documentElement.style.setProperty(
+          "--nav-height",
+          header.offsetHeight + "px"
+        );
+      }
+      syncNavHeight();
+      if (typeof ResizeObserver !== "undefined") {
+        new ResizeObserver(syncNavHeight).observe(header);
+      }
+      window.addEventListener("resize", syncNavHeight);
+    })();
+  </script>
+  <script src="{{ url_for('static', filename='activity.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='update.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='bundled-models.js') }}" defer></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
+>>>>>>> 871aa392064a97663a2fda25a18dfd0b5b9317f7

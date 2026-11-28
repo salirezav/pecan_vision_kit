@@ -24,6 +24,7 @@ from segment_inspect import (
     _finish_names,
     describe_model,
     extract_hailo_export_zip,
+    file_default_names,
     inspect_checkpoint,
     inspect_hailo_export_dir,
     is_hailo_export_dir,
@@ -407,6 +408,7 @@ class ModelService:
             "architecture": meta.get("architecture") if installed else None,
             "resolution": meta.get("resolution") if installed else None,
             "class_names": class_names,
+            "default_class_names": self._status_default_names(meta, class_names) if installed else None,
             "names_from_file": bool(meta.get("names_from_file")) if installed else False,
             "inspect_error": meta.get("inspect_error") if installed else None,
             "loaded": self._loaded,
@@ -722,6 +724,7 @@ class ModelService:
         else:
             num_classes = int(inspect_checkpoint(path)["num_classes"])
         meta["family"] = family
+        self._keep_default_names(meta)
         meta["class_names"] = parse_class_names(class_names_raw, num_classes, family)
         meta["names_from_file"] = False
         meta["filename"] = meta.get("filename") or path.name
@@ -729,6 +732,67 @@ class ModelService:
         meta["id"] = path.name
         self.meta_path().write_text(json.dumps(meta, indent=2))
         return self.status()
+
+    def reset_names(self) -> dict[str, Any]:
+        """Restore the class names that came with the segmentation model."""
+        if self._infer.busy:
+            raise ModelBusy("The model is already working. Wait for it to finish.")
+        self.ensure_seeded()
+        path = self.weights_path()
+        if not _is_installed_entry(path):
+            raise ValueError("Upload a model first.")
+        meta = self._read_meta()
+        if describe_model(meta).get("names_editable") is False:
+            raise ValueError("This model does not use class names.")
+        defaults, from_file = self._default_class_names(path, meta)
+        if not defaults:
+            raise ValueError("This model does not have default class names.")
+        meta["default_class_names"] = defaults
+        meta["default_names_from_file"] = from_file
+        meta["class_names"] = list(defaults)
+        meta["names_from_file"] = from_file
+        meta["filename"] = meta.get("filename") or path.name
+        meta["weights_file"] = path.name
+        meta["id"] = path.name
+        self.meta_path().write_text(json.dumps(meta, indent=2))
+        return self.status()
+
+    def _keep_default_names(self, meta: dict[str, Any]) -> None:
+        """Remember file names before a rename overwrites them."""
+        if self._stored_default_names(meta) is not None:
+            return
+        if not meta.get("names_from_file"):
+            return
+        current = [str(name) for name in (meta.get("class_names") or []) if str(name).strip()]
+        if not current:
+            return
+        meta["default_class_names"] = current
+        meta["default_names_from_file"] = True
+
+    def _stored_default_names(self, meta: dict[str, Any]) -> list[str] | None:
+        stored = meta.get("default_class_names")
+        if not isinstance(stored, list):
+            return None
+        names = [str(name) for name in stored if str(name).strip()]
+        return names or None
+
+    def _status_default_names(self, meta: dict[str, Any], class_names: list[str]) -> list[str] | None:
+        stored = self._stored_default_names(meta)
+        if stored is not None:
+            return stored
+        if meta.get("names_from_file") and class_names:
+            return list(class_names)
+        return None
+
+    def _default_class_names(self, path: Path, meta: dict[str, Any]) -> tuple[list[str], bool]:
+        stored = self._stored_default_names(meta)
+        if stored is not None:
+            return stored, bool(meta.get("default_names_from_file"))
+        if meta.get("names_from_file"):
+            current = [str(name) for name in (meta.get("class_names") or []) if str(name).strip()]
+            if current:
+                return current, True
+        return file_default_names(inspect_checkpoint(path))
 
     def _read_metrics_file(self) -> tuple[list[dict[str, Any]], dict[str, bool]]:
         path = self.metrics_path()
