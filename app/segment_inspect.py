@@ -756,20 +756,33 @@ def library_error(family: str | None = None, backend: str | None = None) -> str 
     return None
 
 
-def _finish_names(info: dict[str, Any], provided: list[str]) -> dict[str, Any]:
+def file_default_names(info: dict[str, Any]) -> tuple[list[str], bool]:
+    """Class names stored in the checkpoint, padded to this model's label slots.
+
+    The second value is True when the file listed at least one name. Models
+    that omit names get the generated Class 1, Class 2, … labels instead.
+    """
     family = str(info.get("family") or "rfdetr")
     num_classes = int(info.get("num_classes") or 0)
     file_names = [str(name) for name in (info.get("class_names") or []) if str(name).strip()]
+    if file_names:
+        return parse_class_names(",".join(file_names), num_classes, family), True
+    return parse_class_names("", num_classes, family), False
+
+
+def _finish_names(info: dict[str, Any], provided: list[str]) -> dict[str, Any]:
+    family = str(info.get("family") or "rfdetr")
+    num_classes = int(info.get("num_classes") or 0)
+    defaults, from_file = file_default_names(info)
+    info["default_class_names"] = defaults
+    info["default_names_from_file"] = from_file
     chosen = [name for name in provided if name]
     if chosen:
         info["class_names"] = parse_class_names(",".join(chosen), num_classes, family)
         info["names_from_file"] = False
-    elif file_names:
-        info["class_names"] = parse_class_names(",".join(file_names), num_classes, family)
-        info["names_from_file"] = True
     else:
-        info["class_names"] = parse_class_names("", num_classes, family)
-        info["names_from_file"] = False
+        info["class_names"] = defaults
+        info["names_from_file"] = from_file
     return info
 
 

@@ -128,6 +128,17 @@ def api_model_names():
         return jsonify({"ok": False, "error": str(exc)}), 400
 
 
+@bp.route("/api/model/names/reset", methods=["POST"])
+def api_model_names_reset():
+    try:
+        status = rt.models.reset_names()
+        return jsonify({"ok": True, **status})
+    except ModelBusy as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 409
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
 @bp.route("/api/model/delete", methods=["POST"])
 def api_model_delete():
     data = request.get_json(silent=True) or {}

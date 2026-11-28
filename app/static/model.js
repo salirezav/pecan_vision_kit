@@ -8,6 +8,7 @@
   const formEl = document.getElementById("upload-form");
   const uploadBtn = document.getElementById("btn-upload");
   const namesBtn = document.getElementById("btn-names");
+  const resetNamesBtn = document.getElementById("btn-names-reset");
   const checkBtn = document.getElementById("btn-check");
   const startBtn = document.getElementById("btn-start");
   const stopBtn = document.getElementById("btn-stop");
@@ -718,6 +719,7 @@
     if (!model) {
       statusEl.textContent = "Looking for a model…";
       statusEl.className = "msg";
+      syncResetNamesButton();
       return;
     }
     const installed = Boolean(model.installed);
@@ -765,6 +767,7 @@
     }
     renderSelectedSummary();
     syncActionButtons();
+    syncResetNamesButton();
     renderMetrics();
     renderModelList();
   }
@@ -1210,8 +1213,40 @@
     overrideNames = false;
   });
 
+  function defaultClassNames() {
+    if (!model) return null;
+    if (Array.isArray(model.default_class_names) && model.default_class_names.length) {
+      return model.default_class_names;
+    }
+    if (model.names_from_file && classNames().length) return classNames();
+    return null;
+  }
+
+  function typedClassNames() {
+    return String(namesEl.value || "").split(",").map((part) => part.trim()).filter(Boolean);
+  }
+
+  function usingDefaultNames() {
+    const defaults = defaultClassNames();
+    if (!defaults) return false;
+    const expected = defaults.join("\0");
+    return classNames().join("\0") === expected && typedClassNames().join("\0") === expected;
+  }
+
+  function syncResetNamesButton() {
+    if (!resetNamesBtn) return;
+    const installed = Boolean(model && model.installed);
+    resetNamesBtn.hidden = namesField.hidden;
+    const alreadyDefault = usingDefaultNames();
+    resetNamesBtn.disabled = !installed || namesField.hidden || alreadyDefault;
+    resetNamesBtn.title = alreadyDefault
+      ? "These are already the model's default class names."
+      : "Use the class names stored in the model.";
+  }
+
   namesEl.addEventListener("input", () => {
     overrideNames = true;
+    syncResetNamesButton();
   });
 
   namesBtn.addEventListener("click", async () => {
@@ -1232,8 +1267,31 @@
       setModelMsg(err.message || String(err), "err");
     } finally {
       namesBtn.disabled = false;
+      syncResetNamesButton();
     }
   });
+
+  if (resetNamesBtn) {
+    resetNamesBtn.addEventListener("click", async () => {
+      resetNamesBtn.disabled = true;
+      namesBtn.disabled = true;
+      try {
+        const response = await fetch("/api/model/names/reset", { method: "POST" });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || "Could not reset names.");
+        model = data;
+        overrideNames = false;
+        setModelMsg("Class names reset to the model defaults.", "ok");
+        resetBuilder();
+        renderStatus();
+      } catch (err) {
+        setModelMsg(err.message || String(err), "err");
+      } finally {
+        namesBtn.disabled = false;
+        syncResetNamesButton();
+      }
+    });
+  }
 
   checkBtn.addEventListener("click", () => {
     if (live || busy) return;
