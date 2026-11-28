@@ -53,6 +53,51 @@ def api_model():
     return jsonify({"ok": True, **rt.models.status()})
 
 
+@bp.route("/api/model/bundled", methods=["GET"])
+def api_model_bundled():
+    return jsonify(
+        {
+            "ok": True,
+            "models": rt.models.bundled_pending(),
+            "library_path": str(rt.models.library_dir()),
+        }
+    )
+
+
+@bp.route("/api/model/install-bundled", methods=["POST"])
+def api_model_install_bundled():
+    data = request.get_json(silent=True) or {}
+    raw = data.get("files")
+    files = raw if isinstance(raw, list) else None
+    try:
+        summary = rt.models.install_bundled(files)
+    except ModelBusy as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 409
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    if summary["bundled_errors"] and not summary["bundled_installed"]:
+        return jsonify(
+            {
+                "ok": False,
+                "error": summary["bundled_errors"][0]["error"],
+                **summary,
+            }
+        ), 400
+    return jsonify({"ok": True, **summary, **rt.models.status()})
+
+
+@bp.route("/api/model/dismiss-bundled", methods=["POST"])
+def api_model_dismiss_bundled():
+    data = request.get_json(silent=True) or {}
+    raw = data.get("files")
+    files = raw if isinstance(raw, list) else None
+    try:
+        result = rt.models.dismiss_bundled(files)
+        return jsonify({"ok": True, **result})
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
 @bp.route("/api/model/upload", methods=["POST"])
 def api_model_upload():
     upload = request.files.get("file")

@@ -62,6 +62,7 @@ On click, `scripts/apply-update.sh` downloads the release tarball, verifies `SHA
 - Apply log: `/mnt/recordings/update-apply.log`
 - Recordings and `/mnt/recordings/config.yaml` are left alone
 - Model weights under `weights/` are left alone
+- Models shipped in `models/` are part of the release. The dashboard asks before copying any that are not already in `/mnt/recordings/models/library`. The same prompt is `scripts/install-bundled-models.sh`.
 - The kit needs a path to the internet before an update can download. That path is the Wi-Fi network the kit has joined, or an Ethernet connection that reaches the internet.
 
 Re-run `./scripts/setup-kit.sh` option **4** (web service) after pulling updater changes so `/etc/sudoers.d/pecan-vision` includes the apply-update path.

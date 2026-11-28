@@ -28,7 +28,9 @@ How to image and hand off a Pecan Vision Kit without campus credentials.
 | App / repo | `/home/pecan/pecan-vision-kit` |
 | Desktop | Launchers only — **not** the live git tree |
 | Recordings + runtime config | `/mnt/recordings` (spare NVMe mount, or a directory on `/` when the OS lives on the only NVMe) |
-| Model weights | `~/pecan-vision-kit/weights/` (local, not in git) |
+| Model library | `/mnt/recordings/models/library` (what the dashboard runs) |
+| Shipped models | `models/` in the repo. Copied into the library from the dashboard prompt or `scripts/install-bundled-models.sh` |
+| Extra local weights | `~/pecan-vision-kit/weights/` (not in git, not replaced by updates) |
 
 ## First image / re-image steps
 
@@ -69,6 +71,7 @@ How to image and hand off a Pecan Vision Kit without campus credentials.
 | `scripts/install-desktop-launchers.sh` | Writes Start / Update / Setup icons on Desktop |
 | `scripts/setup-kit.sh` | Interactive full installer |
 | `scripts/apply-update.sh` | Release install + rollback |
+| `scripts/install-bundled-models.sh` | Ask, then copy shipped models into the dashboard library |
 
 ## Migrating a lab kit off `engr-ugaif`
 

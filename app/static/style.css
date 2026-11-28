@@ -1686,7 +1686,8 @@ input[type="file"] { padding: 0.45rem; }
   font-size: 0.85rem;
   opacity: 0.85;
 }
-#update-banner-host {
+#update-banner-host,
+#bundled-models-host {
   max-width: 1100px;
   margin: 0.75rem auto 0;
   padding: 0 1.25rem;

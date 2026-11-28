@@ -1496,6 +1496,13 @@
     });
   }
 
+  window.addEventListener("pecan-models-changed", () => {
+    refreshStatus().catch((err) => {
+      statusEl.textContent = err.message || String(err);
+      statusEl.className = "msg err";
+    });
+  });
+
   Promise.all([refreshStatus(), refreshMetrics(), refreshRoi()]).catch((err) => {
     statusEl.textContent = err.message || String(err);
     statusEl.className = "msg err";
