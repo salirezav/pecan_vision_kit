@@ -1,4 +1,4 @@
-# Open the dashboard
+# Quick start
 
 Use these steps to show the kit’s dashboard in a web browser on your laptop. You do not need to install anything for the first method.
 

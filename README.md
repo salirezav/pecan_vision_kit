@@ -14,7 +14,7 @@ Web recorder and vision tools for Raspberry Pi 5 workshop kits (USB global-shutt
 
 ## Quick install
 
-On a kit, the sign-in is `pecan`. The password is the name on the label followed immediately by `1234` (kit `usda-vision-08` uses `usda-vision-081234`). To open the dashboard from a laptop, see [Open the dashboard](docs/open-the-dashboard.md).
+On a kit, the sign-in is `pecan`. The password is the name on the label followed immediately by `1234` (kit `usda-vision-08` uses `usda-vision-081234`). To open the dashboard from a laptop, see [Quick start](docs/open-the-dashboard.md).
 
 ```bash
 # On a new kit image (as root once):
@@ -112,8 +112,7 @@ journalctl -u pecan-vision -n 80 --no-pager
 
 | Doc | Purpose |
 |-----|---------|
-| [Open the dashboard](docs/open-the-dashboard.md) | Connect a laptop and open the kit in a browser |
-| [Quick start](docs/USER-GUIDE.md) | Record, watch, and change camera settings |
+| [Quick start](docs/open-the-dashboard.md) | Connect a laptop and open the kit in a browser |
 | [Admin](docs/ADMIN.md) | Service control, updates, troubleshooting |
 
 ## License

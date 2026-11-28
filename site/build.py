@@ -33,12 +33,11 @@ class Page:
 PAGES: tuple[Page, ...] = (
     Page("index.html", "Overview", ROOT / "README.md", "Pecan Vision Kit"),
     Page(
-        "open-the-dashboard.html",
-        "Connect",
+        "quick-start.html",
+        "Quick start",
         DOCS / "open-the-dashboard.md",
-        "Open the dashboard · Pecan Vision Kit",
+        "Quick start · Pecan Vision Kit",
     ),
-    Page("user-guide.html", "Quick start", DOCS / "USER-GUIDE.md", "Quick start · Pecan Vision Kit"),
     Page("admin.html", "Admin", DOCS / "ADMIN.md", "Admin · Pecan Vision Kit"),
 )
 

@@ -12,14 +12,14 @@ From there you can **start / stop / restart** the `pecan-vision` service, see di
 
 ## VNC into the Pi
 
-The kit’s desktop is already available over VNC. The full steps are in [Open the dashboard](open-the-dashboard.md).
+The kit’s desktop is already available over VNC. The full steps are in [Quick start](open-the-dashboard.md).
 
 1. Keep the Ethernet cable connected for the first connection.
 2. In RealVNC Viewer, or another VNC app, connect to `usda-vision-08.local:5900` (use the number on your label).
 3. Log in as `pecan`. The password is the kit’s name on the label followed immediately by `1234`. Kit `usda-vision-08` uses `usda-vision-081234`.
 4. Open a terminal or browser on the Pi’s desktop as needed.
 
-Opening the dashboard from a laptop is covered in [Open the dashboard](open-the-dashboard.md).
+Opening the dashboard from a laptop is covered in [Quick start](open-the-dashboard.md).
 
 Useful terminal commands:
 
